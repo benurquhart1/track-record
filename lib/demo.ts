@@ -88,9 +88,10 @@ const yearsOf = (cards: Card[], playerId: string) =>
 /** Grades a guess the way the server does and hands out the card. */
 function grade(state: RoomState, playerId: string, slot: number, ok?: boolean): RoomState {
   const { round, secret } = state;
-  if (!round || !secret) return state;
+  if (!round || !secret || secret.year === null) return state;
+  const year = secret.year;
   const b = bounds(yearsOf(state.cards, playerId), slot);
-  const correct = ok ?? ((b.lower_year === null || b.lower_year <= secret.year) && (b.upper_year === null || secret.year <= b.upper_year));
+  const correct = ok ?? ((b.lower_year === null || b.lower_year <= year) && (b.upper_year === null || year <= b.upper_year));
   const answer: Answer = { round_id: round.id, player_id: playerId, slot, is_correct: correct, ...b };
   const cards = correct
     ? [
@@ -99,7 +100,7 @@ function grade(state: RoomState, playerId: string, slot: number, ok?: boolean): 
           id: `c-${playerId}-${round.id}`,
           player_id: playerId,
           round_id: round.id,
-          year: secret.year,
+          year,
           title: secret.title,
           artist: secret.artist,
           image_url: secret.image_url,

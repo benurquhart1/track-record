@@ -105,15 +105,20 @@ function RevealPanel({ state, meId }: { state: RoomState; meId: string }) {
   const { secret, round } = state;
   const mine = state.answers.find((a) => a.player_id === meId);
   const stillOpen = round?.status === "open";
-  const off = mine && !mine.is_correct && secret ? missBy(mine, secret.year) : 0;
+  const pending = !!mine && mine.is_correct === null;
+  const off = mine && mine.is_correct === false && secret?.year ? missBy(mine, secret.year) : 0;
   const verdict = !mine
     ? "You didn't guess this one."
-    : mine.is_correct
+    : pending
+      ? "Locked in! Checking the year…"
+      : mine.is_correct
       ? "Correct! It's in your timeline."
       : `Wrong${off ? ` by ${off} year${off === 1 ? "" : "s"}` : ""}, the card is gone.`;
   return (
-    <Panel className={`text-center ${mine?.is_correct ? "border-good" : mine ? "border-bad" : ""}`}>
-      <p className={`text-xl font-black ${mine?.is_correct ? "text-good" : mine ? "text-bad" : "text-white/70"}`}>{verdict}</p>
+    <Panel className={`text-center ${pending ? "" : mine?.is_correct ? "border-good" : mine ? "border-bad" : ""}`}>
+      <p className={`text-xl font-black ${pending ? "animate-pulse text-white" : mine?.is_correct ? "text-good" : mine ? "text-bad" : "text-white/70"}`}>
+        {verdict}
+      </p>
       {secret && (
         <div className="mt-4 flex items-center gap-4 text-left">
           {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -122,9 +127,13 @@ function RevealPanel({ state, meId }: { state: RoomState; meId: string }) {
             <p className="truncate font-bold">{secret.title}</p>
             <p className="truncate text-sm text-white/50">{secret.artist}</p>
           </div>
-          <p className="text-3xl font-black" style={{ color: yearColor(secret.year) }}>
-            {secret.year}
-          </p>
+          {secret.year !== null ? (
+            <p className="text-3xl font-black" style={{ color: yearColor(secret.year) }}>
+              {secret.year}
+            </p>
+          ) : (
+            <p className="text-3xl font-black text-white/30">????</p>
+          )}
         </div>
       )}
       <p className="mt-3 text-sm text-white/50">{stillOpen ? "Others are still guessing. Keep it quiet!" : "Waiting for the next song…"}</p>

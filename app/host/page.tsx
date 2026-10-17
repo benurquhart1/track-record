@@ -17,13 +17,18 @@ const QUEUE_MS = 10_000;
 type YearResult = { year: number | null; source: string };
 type Track = { id: string; title: string; artist: string; isrc: string | null; albumYear: number | null };
 
-// Year lookups by Spotify track id. Queued songs are looked up ahead of time, so when one starts
-// playing its round opens straight away instead of waiting several seconds on MusicBrainz.
+// Year lookups by Spotify track id. Queued songs are looked up ahead of time so their round
+// starts with the year already known; otherwise the round starts without it and the year is
+// filled in when the lookup finishes (guesses made meanwhile wait for it).
 const yearCache = new Map<string, Promise<YearResult>>();
+const yearsKnown = new Map<string, YearResult>();
 function yearFor(t: Track): Promise<YearResult> {
   let p = yearCache.get(t.id);
   if (!p) {
-    p = resolveYear(cleanTitle(t.title), t.artist, t.isrc, t.albumYear);
+    p = resolveYear(cleanTitle(t.title), t.artist, t.isrc, t.albumYear).then((r) => {
+      yearsKnown.set(t.id, r);
+      return r;
+    });
     yearCache.set(t.id, p);
   }
   return p;
@@ -194,16 +199,31 @@ function HostGame({
         if (!np || !np.isPlaying || np.id === lastTrack.current) return;
         lastTrack.current = np.id;
         const title = cleanTitle(np.title);
-        const { year, source } = await yearFor(np);
-        setYearSource(source);
-        if (!year) {
-          setError(`Couldn't find a year for "${title}", skipping it.`);
-          return;
-        }
-        await openRound(room.id, { spotifyTrackId: np.id, title, artist: np.artist, year, imageUrl: np.imageUrl });
+        const lookup = yearFor(np);
+        const known = yearsKnown.get(np.id);
+        setYearSource(known?.source ?? null);
+        const song = { spotifyTrackId: np.id, title, artist: np.artist, imageUrl: np.imageUrl };
+        const opened = await openRound(room.id, { ...song, year: known?.year ?? null }).catch(async (e: Error) => {
+          // Databases without the 0003 migration need the year up front.
+          if (known || !e.message.includes("null value")) throw e;
+          const { year } = await lookup;
+          if (!year) throw new Error(`Couldn't find a year for "${title}", skipping it.`);
+          return openRound(room.id, { ...song, year });
+        });
         setError(null);
         setPeek(false);
         await refresh();
+        // Fill the year in when the lookup lands, without holding up the next Spotify check.
+        if (!known && opened) {
+          lookup
+            .then(async ({ year, source }) => {
+              setYearSource(source);
+              if (year) await setRoundYear(opened.id, year);
+              else setError(`Couldn't find a year for "${title}". Peek and enter it below.`);
+              await refresh();
+            })
+            .catch((e: Error) => setError(e.message));
+        }
       } catch (e) {
         const msg = (e as Error).message;
         setError(msg);
@@ -280,7 +300,7 @@ function HostGame({
                 <p className="truncate font-bold">{secret.title}</p>
                 <p className="truncate text-sm text-white/50">{secret.artist}</p>
               </div>
-              <p className="text-3xl font-black text-accent-2">{secret.year}</p>
+              <p className="text-3xl font-black text-accent-2">{secret.year ?? "…"}</p>
             </div>
           )}
           {secret && peek && open && yearSource && secret.spotify_track_id && (

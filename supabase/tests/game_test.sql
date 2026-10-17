@@ -107,5 +107,23 @@ select end_game(:'room2');
 select status = 'finished' and winner_player_id = :'alice2' as ok_end from rooms where id = :'room2' \gset
 \if :ok_end \else \echo 'FAIL: end_game' \quit \endif
 
+-- Year not known yet: the guess waits ungraded, then is graded when the host sets the year.
+select id as room3, code as code3 from create_room(null, 1) \gset
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+select id as alice3 from join_room(:'code3', 'Alice') \gset
+reset role;
+update timeline_cards set year = 1990 where player_id = :'alice3';
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+select id as r5 from open_round(:'room3', 'trk5', 'Song E', 'Artist', null, null) \gset
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+select is_correct is null as ok_pending from submit_answer(:'r5', 0) \gset
+\if :ok_pending \else \echo 'FAIL: guess graded before the year was known' \quit \endif
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+select set_round_year(:'r5', 1980);
+select (select is_correct from answers where round_id = :'r5') and
+       (select count(*) from timeline_cards where round_id = :'r5') = 1 as ok_graded \gset
+\if :ok_graded \else \echo 'FAIL: pending guess not graded' \quit \endif
+
 select * from alltime_leaderboard order by wins desc;
 \echo 'ALL TESTS PASSED'

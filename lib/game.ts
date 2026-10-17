@@ -15,7 +15,7 @@ export type Room = {
 };
 export type Player = { id: string; room_id: string; uid: string; nickname: string; created_at: string };
 export type Round = { id: string; room_id: string; number: number; status: "open" | "closed"; opened_at: string };
-export type Secret = { round_id: string; spotify_track_id: string | null; title: string; artist: string; year: number; image_url: string | null };
+export type Secret = { round_id: string; spotify_track_id: string | null; title: string; artist: string; /** null until the host's lookup finds it. */ year: number | null; image_url: string | null };
 export type Answer = {
   round_id: string;
   player_id: string;
@@ -68,7 +68,7 @@ export const closeRound = (roundId: string) => rpc<void>("close_round", { p_roun
 export const setRoundYear = (roundId: string, year: number) => rpc<void>("set_round_year", { p_round: roundId, p_year: year });
 export const openRound = (
   roomId: string,
-  song: { spotifyTrackId: string | null; title: string; artist: string; year: number; imageUrl: string | null },
+  song: { spotifyTrackId: string | null; title: string; artist: string; year: number | null; imageUrl: string | null },
 ) =>
   rpc<Round | null>("open_round", {
     p_room: roomId,
@@ -106,7 +106,7 @@ async function loadRoom(roomId: string): Promise<RoomState | null> {
       .select("round_id, year, image_url")
       .in("round_id", roundList.map((r) => r.id));
     const covers = new Map((revealed ?? []).map((s) => [s.round_id, s.image_url]));
-    for (const s of revealed ?? []) years[s.round_id] = s.year;
+    for (const s of revealed ?? []) if (s.year !== null) years[s.round_id] = s.year;
     for (const c of cardList) c.image_url = c.round_id ? covers.get(c.round_id) ?? null : null;
   }
   let secret: Secret | null = null;
