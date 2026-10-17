@@ -153,11 +153,12 @@ export async function GET(req: Request) {
     }
   }
 
-  // The earliest year at least two releases agree on: one mis-dated compilation shouldn't win
-  // (Crazy in Love has a single "1999" entry). With only one-offs, take the earliest.
+  // The earliest trustworthy year: a single by the artist, or a year at least two releases agree
+  // on. One mis-dated compilation shouldn't win (Crazy in Love has a lone "1999" entry), but a
+  // lone original single should (What a Wonderful World's 1967 single vs its 1988 re-release).
   const sorted = [...found].sort((a, b) => a.year - b.year);
-  const count = (y: number) => found.filter((f) => f.year === y).length;
-  const first = sorted.find((f) => count(f.year) >= 2) ?? sorted[0];
+  const trusted = (f: Found) => f.from === "single" || found.filter((g) => g.year === f.year).length >= 2;
+  const first = sorted.find(trusted) ?? sorted[0];
   const year = first?.year ?? null;
   const result = first
     ? { year: first.year, source: "musicbrainz", matched: first.title }
