@@ -2,10 +2,12 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { PlayerView } from "@/components/PlayerView";
 import { Button, ErrorText } from "@/components/ui";
-import { findRoomByCode, joinRoom, submitAnswer, useRoom } from "@/lib/game";
+import { findRoomByCode, joinRoom, submitAnswer, useRoom, type RoomState } from "@/lib/game";
+import { useHostDriver } from "@/lib/hostDriver";
+import { isLoggedIn, logout } from "@/lib/spotify";
 import { ensureSession } from "@/lib/supabase";
 
 const NICK_KEY = "nickname";
@@ -41,7 +43,7 @@ export default function PlayPage() {
 
   const me = state.players.find((p) => p.uid === uid);
   if (!me) return <JoinForm code={state.room.code} onJoined={refresh} />;
-  return (
+  const view = (
     <PlayerView
       key={state.round?.id ?? "lobby"}
       state={state}
@@ -51,6 +53,53 @@ export default function PlayPage() {
         await refresh();
       }}
     />
+  );
+  // The host playing on the same device: this screen keeps the game going while it's open.
+  if (state.room.host_uid === uid && isLoggedIn()) {
+    return (
+      <HostingPlayer state={state} refresh={refresh}>
+        {view}
+      </HostingPlayer>
+    );
+  }
+  return view;
+}
+
+function HostingPlayer({ state, refresh, children }: { state: RoomState; refresh: () => Promise<void>; children: ReactNode }) {
+  const [spotify, setSpotify] = useState(true);
+  const { error, nowPlaying } = useHostDriver({
+    state,
+    refresh,
+    spotify,
+    onSpotifyLost: () => {
+      logout();
+      setSpotify(false);
+    },
+  });
+  return (
+    <div>
+      <p className="mb-3 rounded-xl border border-line bg-panel px-3 py-2 text-center text-xs text-white/60">
+        {spotify ? (
+          <>
+            You&apos;re hosting. Keep this screen or the{" "}
+            <Link href="/host" className="text-accent underline">
+              host page
+            </Link>{" "}
+            open to catch new songs.
+            {nowPlaying === "nothing" && " Spotify isn't playing anything."}
+          </>
+        ) : (
+          <>
+            Spotify disconnected.{" "}
+            <Link href="/host" className="text-accent underline">
+              Reconnect on the host page
+            </Link>
+          </>
+        )}
+      </p>
+      <ErrorText error={error} />
+      {children}
+    </div>
   );
 }
 
