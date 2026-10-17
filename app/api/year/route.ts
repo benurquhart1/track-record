@@ -23,10 +23,17 @@ function yearOf(date?: string): number | null {
 const norm = (s: string) => s.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]/g, "");
 
 // Results don't change, so keep them for the life of the server instance.
+let lastCall = 0;
 const cache = new Map<string, { year: number | null; source: string }>();
 
-async function mb(path: string): Promise<{ recordings?: Recording[] } | null> {
+type ReleaseGroup = { "first-release-date"?: string; score?: number; "artist-credit"?: Recording["artist-credit"] };
+
+async function mb(path: string): Promise<{ recordings?: Recording[]; "release-groups"?: ReleaseGroup[] } | null> {
   for (let attempt = 0; attempt < 2; attempt++) {
+    // Stay under MusicBrainz's limit of about one request a second.
+    const wait = lastCall + 1050 - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastCall = Date.now();
     try {
       const res = await fetch(`https://musicbrainz.org/ws/2/${path}`, {
         headers: { "User-Agent": UA, Accept: "application/json" },
@@ -39,7 +46,6 @@ async function mb(path: string): Promise<{ recordings?: Recording[] } | null> {
     } catch {
       // timeout or network error: retry once
     }
-    await new Promise((r) => setTimeout(r, 1100));
   }
   return null;
 }
@@ -66,26 +72,42 @@ export async function GET(req: Request) {
 
   const key = `${isrc}|${norm(title)}|${norm(artist)}`;
   const hit = cache.get(key);
-  if (hit) return NextResponse.json(hit);
+  if (hit && !q.get("debug")) return NextResponse.json(hit);
 
   const years: number[] = [];
+  const found: Record<string, number[]> = {};
 
   // 1. The exact recording Spotify is playing, by its ISRC code.
   if (isrc) {
     const data = await mb(`isrc/${encodeURIComponent(isrc)}?fmt=json&inc=releases`);
-    years.push(...earliest(data?.recordings ?? []));
+    found.isrc = earliest(data?.recordings ?? []);
+    years.push(...found.isrc);
   }
 
-  // 2. Other recordings of the same song by the same artist (the original single, album, etc.).
+  const t = title.replace(/"/g, "");
+  const a = artist.replace(/"/g, "");
+  const byArtist = (credits: Recording["artist-credit"]) =>
+    (credits ?? []).some((c) => norm(c.name ?? c.artist?.name ?? "").includes(norm(artist)));
+
   if (title && artist) {
-    const query = `recording:"${title.replace(/"/g, "")}" AND artist:"${artist.replace(/"/g, "")}" AND status:official`;
-    const data = await mb(`recording?fmt=json&limit=25&query=${encodeURIComponent(query)}`);
-    const matches = (data?.recordings ?? []).filter(
-      (r) =>
-        (r.score ?? 0) >= 90 &&
-        (r["artist-credit"] ?? []).some((c) => norm(c.name ?? c.artist?.name ?? "").includes(norm(artist))),
+    // 2. Singles and albums with the song's title by the artist: hits were almost always singles,
+    // and a release group's date is its first-ever release.
+    const groups = await mb(
+      `release-group?fmt=json&limit=50&query=${encodeURIComponent(`releasegroup:"${t}" AND artist:"${a}"`)}`,
     );
-    years.push(...earliest(matches));
+    found.releaseGroups = (groups?.["release-groups"] ?? [])
+      .filter((g) => (g.score ?? 0) >= 90 && byArtist(g["artist-credit"]))
+      .map((g) => yearOf(g["first-release-date"]))
+      .filter((y): y is number => y !== null);
+    years.push(...found.releaseGroups);
+
+    // 3. Every recording of the song by the artist (the original single, album cuts, etc.).
+    // Popular songs have hundreds, so ask for the maximum page.
+    const recs = await mb(
+      `recording?fmt=json&limit=100&query=${encodeURIComponent(`recording:"${t}" AND artist:"${a}"`)}`,
+    );
+    found.recordings = earliest((recs?.recordings ?? []).filter((r) => (r.score ?? 0) >= 90 && byArtist(r["artist-credit"])));
+    years.push(...found.recordings);
   }
 
   const result =
@@ -93,5 +115,9 @@ export async function GET(req: Request) {
       ? { year: Math.min(...years), source: "musicbrainz" }
       : { year: spotifyYear, source: spotifyYear ? "spotify" : "none" };
   if (years.length > 0) cache.set(key, result);
+  if (q.get("debug")) {
+    const min = (ys: number[] = []) => (ys.length ? Math.min(...ys) : null);
+    return NextResponse.json({ ...result, earliest: { isrc: min(found.isrc), releaseGroups: min(found.releaseGroups), recordings: min(found.recordings) } });
+  }
   return NextResponse.json(result);
 }
