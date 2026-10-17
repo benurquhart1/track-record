@@ -8,13 +8,23 @@ export type Room = {
   code: string;
   host_uid: string;
   status: "lobby" | "playing" | "finished";
-  target_cards: number;
+  /** null = no card limit; the host ends the game. */
+  target_cards: number | null;
+  starting_cards: number;
   winner_player_id: string | null;
 };
 export type Player = { id: string; room_id: string; uid: string; nickname: string; created_at: string };
-export type Round = { id: string; room_id: string; number: number; status: "open" | "closed" };
+export type Round = { id: string; room_id: string; number: number; status: "open" | "closed"; opened_at: string };
 export type Secret = { round_id: string; spotify_track_id: string | null; title: string; artist: string; year: number; image_url: string | null };
-export type Answer = { round_id: string; player_id: string; slot: number; is_correct: boolean | null };
+export type Answer = {
+  round_id: string;
+  player_id: string;
+  slot: number;
+  is_correct: boolean | null;
+  /** The years either side of the gap the player picked (null = open-ended). */
+  lower_year: number | null;
+  upper_year: number | null;
+};
 export type Card = {
   id: string;
   player_id: string;
@@ -32,8 +42,14 @@ export type RoomState = {
   round: Round | null;
   /** Only visible to players once the round is revealed; the host always sees it. */
   secret: Secret | null;
-  /** Players see their own answer until the reveal, then everyone's. */
+  /** This round's answers. Players see their own straight away, everyone's once the round closes. */
   answers: Answer[];
+  /** Every round so far, oldest first. */
+  rounds: Round[];
+  /** Every answer this player can see, across all rounds (for stats). */
+  history: Answer[];
+  /** Real year of every round whose song this player can see. */
+  years: Record<string, number>;
   cards: Card[];
 };
 
@@ -43,9 +59,11 @@ async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   return data as T;
 }
 
-export const createRoom = (targetCards: number) => rpc<Room>("create_room", { p_target_cards: targetCards });
+export const createRoom = (targetCards: number | null, startingCards: number) =>
+  rpc<Room>("create_room", { p_target_cards: targetCards, p_starting_cards: startingCards });
 export const joinRoom = (code: string, nickname: string) => rpc<Player>("join_room", { p_code: code, p_nickname: nickname });
-export const submitAnswer = (roundId: string, slot: number) => rpc<void>("submit_answer", { p_round: roundId, p_slot: slot });
+export const submitAnswer = (roundId: string, slot: number) => rpc<Answer>("submit_answer", { p_round: roundId, p_slot: slot });
+export const endGame = (roomId: string) => rpc<void>("end_game", { p_room: roomId });
 export const closeRound = (roundId: string) => rpc<void>("close_round", { p_round: roundId });
 export const setRoundYear = (roundId: string, year: number) => rpc<void>("set_round_year", { p_round: roundId, p_year: year });
 export const openRound = (
@@ -68,31 +86,46 @@ export async function findRoomByCode(code: string): Promise<Room | null> {
 
 async function loadRoom(roomId: string): Promise<RoomState | null> {
   const sb = supabase();
-  const [room, players, round, cards] = await Promise.all([
+  const [room, players, rounds, cards, history] = await Promise.all([
     sb.from("rooms").select("*").eq("id", roomId).maybeSingle(),
     sb.from("players").select("*").eq("room_id", roomId).order("created_at"),
-    sb.from("rounds").select("*").eq("room_id", roomId).order("number", { ascending: false }).limit(1).maybeSingle(),
+    sb.from("rounds").select("*").eq("room_id", roomId).order("number"),
     sb.from("timeline_cards").select("*").eq("room_id", roomId).order("year"),
+    sb.from("answers").select("*").eq("room_id", roomId),
   ]);
   if (!room.data) return null;
+  const roundList: Round[] = rounds.data ?? [];
+  const round = { data: roundList.at(-1) ?? null };
+  const answerList: Answer[] = history.data ?? [];
   const cardList: Card[] = cards.data ?? [];
-  const roundIds = [...new Set(cardList.map((c) => c.round_id).filter((id): id is string => !!id))];
-  if (roundIds.length) {
-    const { data: covers } = await sb.from("round_secrets").select("round_id, image_url").in("round_id", roundIds);
-    const byRound = new Map((covers ?? []).map((c) => [c.round_id, c.image_url]));
-    for (const c of cardList) c.image_url = c.round_id ? byRound.get(c.round_id) ?? null : null;
+  // Covers for won cards and years for stats. Only songs this player may already see come back.
+  const years: Record<string, number> = {};
+  if (roundList.length) {
+    const { data: revealed } = await sb
+      .from("round_secrets")
+      .select("round_id, year, image_url")
+      .in("round_id", roundList.map((r) => r.id));
+    const covers = new Map((revealed ?? []).map((s) => [s.round_id, s.image_url]));
+    for (const s of revealed ?? []) years[s.round_id] = s.year;
+    for (const c of cardList) c.image_url = c.round_id ? covers.get(c.round_id) ?? null : null;
   }
   let secret: Secret | null = null;
-  let answers: Answer[] = [];
   if (round.data) {
-    const [s, a] = await Promise.all([
-      sb.from("round_secrets").select("*").eq("round_id", round.data.id).maybeSingle(),
-      sb.from("answers").select("*").eq("round_id", round.data.id),
-    ]);
+    const s = await sb.from("round_secrets").select("*").eq("round_id", round.data.id).maybeSingle();
     secret = s.data;
-    answers = a.data ?? [];
   }
-  return { room: room.data, players: players.data ?? [], round: round.data, secret, answers, cards: cardList };
+  const answers = round.data ? answerList.filter((a) => a.round_id === round.data!.id) : [];
+  return {
+    room: room.data,
+    players: players.data ?? [],
+    round: round.data,
+    secret,
+    answers,
+    rounds: roundList,
+    history: answerList,
+    years,
+    cards: cardList,
+  };
 }
 
 /** Live view of a room: loads everything, then reloads whenever anything in the room changes. */

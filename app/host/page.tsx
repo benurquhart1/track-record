@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Leaderboard } from "@/components/Leaderboard";
 import { QrCode } from "@/components/QrCode";
 import { Button, ErrorText, Panel } from "@/components/ui";
-import { closeRound, createRoom, openRound, setRoundYear, standings, useRoom } from "@/lib/game";
+import { closeRound, createRoom, endGame, openRound, setRoundYear, standings, useRoom } from "@/lib/game";
 import { getNowPlaying, isLoggedIn, logout, startLogin } from "@/lib/spotify";
 import { ensureSession } from "@/lib/supabase";
 import { cleanTitle } from "@/lib/year";
@@ -29,7 +29,8 @@ export default function HostPage() {
   const [manual, setManual] = useState(false);
   const [roomId, setRoomId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [target, setTarget] = useState(10);
+  const [target, setTarget] = useState<number | null>(10);
+  const [starting, setStarting] = useState(1);
   const { state, refresh } = useRoom(roomId);
 
   useEffect(() => {
@@ -67,21 +68,40 @@ export default function HostPage() {
         <Panel>
           <label className="block text-sm font-semibold text-white/60">Cards needed to win</label>
           <div className="mt-3 flex gap-2">
-            {[5, 10, 15].map((n) => (
+            {[5, 10, 15, null].map((n) => (
               <button
-                key={n}
+                key={n ?? "none"}
                 onClick={() => setTarget(n)}
                 className={`flex-1 rounded-xl border py-3 text-xl font-bold ${target === n ? "border-accent bg-accent/20" : "border-line"}`}
               >
-                {n}
+                {n ?? "∞"}
               </button>
             ))}
           </div>
+          {target === null && <p className="mt-2 text-sm text-white/50">No limit. You end the game when you&apos;re done.</p>}
+        </Panel>
+        <Panel>
+          <label className="block text-sm font-semibold text-white/60">Starting cards per player</label>
+          <div className="mt-3 flex items-center gap-3">
+            <button onClick={() => setStarting((n) => Math.max(1, n - 1))} className="h-12 w-12 rounded-xl border border-line text-2xl font-bold">
+              −
+            </button>
+            <input
+              value={starting}
+              onChange={(e) => setStarting(Math.max(1, Math.min(10, parseInt(e.target.value.replace(/\D/g, ""), 10) || 1)))}
+              inputMode="numeric"
+              className="h-12 min-w-0 flex-1 rounded-xl border border-line bg-ink text-center text-xl font-bold"
+            />
+            <button onClick={() => setStarting((n) => Math.min(10, n + 1))} className="h-12 w-12 rounded-xl border border-line text-2xl font-bold">
+              +
+            </button>
+          </div>
+          <p className="mt-2 text-sm text-white/50">Everyone gets their own random years from 1950 to 2022.</p>
         </Panel>
         <Button
           onClick={async () => {
             try {
-              const room = await createRoom(target);
+              const room = await createRoom(target, starting);
               localStorage.setItem(ROOM_KEY, room.id);
               setRoomId(room.id);
             } catch (e) {
@@ -206,7 +226,7 @@ function HostGame({
         <p className="text-right text-sm text-white/50">
           {players.length} player{players.length === 1 ? "" : "s"}
           <br />
-          first to {room.target_cards} cards
+          {room.target_cards ? `first to ${room.target_cards} cards` : "no card limit"}
         </p>
       </header>
 
@@ -307,6 +327,18 @@ function HostGame({
             <QrCode value={joinUrl} />
           </div>
         </details>
+      )}
+      {!finished && players.length > 0 && (
+        <Button
+          variant="ghost"
+          onClick={() => {
+            if (window.confirm("End the game now? Whoever has the most cards wins.")) {
+              endGame(room.id).then(refresh).catch((e: Error) => setError(e.message));
+            }
+          }}
+        >
+          End game
+        </Button>
       )}
       <button className="w-full text-sm text-white/40 underline" onClick={onNewGame}>
         End this game and start a new one

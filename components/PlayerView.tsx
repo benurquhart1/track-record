@@ -6,8 +6,9 @@ import { Timeline } from "@/components/Timeline";
 import { Button, ErrorText, Panel } from "@/components/ui";
 import { yearColor } from "@/lib/colors";
 import { cardsOf, type RoomState } from "@/lib/game";
+import { missBy } from "@/lib/stats";
 
-/** The player's whole game screen. Pure UI: data comes in, the lock-in action goes out. */
+/** The player's whole game screen. Pure UI: data comes in, the guess goes out. */
 export function PlayerView({
   state,
   meId,
@@ -24,9 +25,23 @@ export function PlayerView({
   const [saving, setSaving] = useState(false);
   const cards = cardsOf(state, meId);
   const open = round?.status === "open";
-  const lockedIn = myAnswer !== null && myAnswer.slot === slot;
+  // A guess is graded the moment it's in, so the player sees the answer without waiting for anyone.
+  const guessing = open && !myAnswer && room.status !== "finished";
   const winner = players.find((p) => p.id === room.winner_player_id);
-  const newCard = round && !open ? cards.find((c) => c.round_id === round.id) : undefined;
+  const newCard = round && myAnswer ? cards.find((c) => c.round_id === round.id) : undefined;
+
+  const submit = async () => {
+    if (slot === null || !round || saving) return;
+    setSaving(true);
+    try {
+      await onLockIn(round.id, slot);
+      setError(null);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div className="space-y-5">
@@ -34,7 +49,7 @@ export function PlayerView({
         <p className="text-sm font-semibold text-white/50">Game {room.code}</p>
         <p className="font-black">
           {cards.length}
-          <span className="font-normal text-white/40">/{room.target_cards} cards</span>
+          <span className="font-normal text-white/40">{room.target_cards ? `/${room.target_cards}` : ""} cards</span>
         </p>
       </header>
 
@@ -48,7 +63,7 @@ export function PlayerView({
           <p className="text-xl font-bold">You&apos;re in!</p>
           <p className="mt-2 text-white/60">Waiting for the first song…</p>
         </Panel>
-      ) : open ? (
+      ) : guessing ? (
         <Panel className="text-center">
           <p className="text-sm font-semibold text-white/50">Song {round.number}</p>
           <p className="mt-1 text-2xl font-black">When was this released?</p>
@@ -59,31 +74,24 @@ export function PlayerView({
       )}
 
       <section>
-        <Timeline cards={cards} picking={open && room.status !== "finished"} selected={slot} onPick={setSlot} highlightId={newCard?.id} />
+        {guessing && (
+          <div className="sticky top-2 z-20 mb-3">
+            <Button disabled={slot === null || saving} onClick={submit}>
+              {saving ? "Submitting…" : slot === null ? "Place the song to submit" : "Submit guess"}
+            </Button>
+            <ErrorText error={error} />
+          </div>
+        )}
+        <Timeline
+          cards={cards}
+          picking={guessing}
+          selected={slot}
+          onPick={setSlot}
+          onSubmit={submit}
+          submitting={saving}
+          highlightId={newCard?.id}
+        />
       </section>
-
-      {open && room.status !== "finished" && (
-        <div className="sticky bottom-4">
-          <Button
-            disabled={slot === null || lockedIn || saving}
-            onClick={async () => {
-              if (slot === null || !round) return;
-              setSaving(true);
-              try {
-                await onLockIn(round.id, slot);
-                setError(null);
-              } catch (e) {
-                setError((e as Error).message);
-              } finally {
-                setSaving(false);
-              }
-            }}
-          >
-            {lockedIn ? "Locked in. You can still change it." : myAnswer ? "Change my answer" : "Lock it in"}
-          </Button>
-          <ErrorText error={error} />
-        </div>
-      )}
 
       <Panel>
         <h2 className="mb-3 font-bold">Leaderboard</h2>
@@ -94,9 +102,15 @@ export function PlayerView({
 }
 
 function RevealPanel({ state, meId }: { state: RoomState; meId: string }) {
-  const { secret } = state;
+  const { secret, round } = state;
   const mine = state.answers.find((a) => a.player_id === meId);
-  const verdict = !mine ? "You didn't guess this one." : mine.is_correct ? "Correct! It's in your timeline." : "Wrong, the card is gone.";
+  const stillOpen = round?.status === "open";
+  const off = mine && !mine.is_correct && secret ? missBy(mine, secret.year) : 0;
+  const verdict = !mine
+    ? "You didn't guess this one."
+    : mine.is_correct
+      ? "Correct! It's in your timeline."
+      : `Wrong${off ? ` by ${off} year${off === 1 ? "" : "s"}` : ""}, the card is gone.`;
   return (
     <Panel className={`text-center ${mine?.is_correct ? "border-good" : mine ? "border-bad" : ""}`}>
       <p className={`text-xl font-black ${mine?.is_correct ? "text-good" : mine ? "text-bad" : "text-white/70"}`}>{verdict}</p>
@@ -113,7 +127,7 @@ function RevealPanel({ state, meId }: { state: RoomState; meId: string }) {
           </p>
         </div>
       )}
-      <p className="mt-3 text-sm text-white/50">Waiting for the next song…</p>
+      <p className="mt-3 text-sm text-white/50">{stillOpen ? "Others are still guessing. Keep it quiet!" : "Waiting for the next song…"}</p>
     </Panel>
   );
 }
