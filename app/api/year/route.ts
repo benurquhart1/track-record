@@ -11,6 +11,9 @@ import { cleanTitle, firstArtist } from "@/lib/year";
 //   2. every single the artist released (browsed, not searched) whose title is this song,
 //   3. every recording of the song credited to that exact artist.
 
+// A lookup is several MusicBrainz calls a second apart; give it room past the default timeout.
+export const maxDuration = 30;
+
 const UA = "track-record/0.3 (private party game; github.com/benurquhart1/track-record)";
 
 type Credit = { name?: string; artist?: { id?: string; name?: string } }[];
@@ -133,7 +136,7 @@ export async function GET(req: Request) {
 
   if (artistId && songKey) {
     // 2. Every single by the artist, oldest first, looking for this song's title.
-    for (let offset = 0; offset < 300; offset += 100) {
+    for (let offset = 0; offset < 200; offset += 100) {
       const data = await ask(`release-group?fmt=json&artist=${artistId}&type=single&limit=100&offset=${offset}`);
       const groups = (data?.["release-groups"] ?? []) as ReleaseGroup[];
       for (const g of groups) if (sameSong(g.title)) add("single", g.title, g["first-release-date"]);
@@ -142,7 +145,7 @@ export async function GET(req: Request) {
 
     // 3. Every recording of the song credited to this exact artist.
     const query = `recording:"${lucene(title)}" AND arid:${artistId}`;
-    for (let offset = 0; offset < 300; offset += 100) {
+    for (let offset = 0; offset < 200; offset += 100) {
       const data = await ask(`recording?fmt=json&limit=100&offset=${offset}&query=${encodeURIComponent(query)}`);
       const recs = (data?.recordings ?? []) as Recording[];
       for (const r of recs) if (sameSong(r.title)) addYears("recording", r.title, recordingYears(r));
