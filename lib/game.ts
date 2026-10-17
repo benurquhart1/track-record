@@ -53,6 +53,9 @@ export type RoomState = {
   cards: Card[];
 };
 
+// Listed out because the table also holds a column players aren't allowed to read.
+const SECRET_COLUMNS = "round_id, spotify_track_id, title, artist, year, image_url";
+
 async function rpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   const { data, error } = await supabase().rpc(fn, args);
   if (error) throw new Error(error.message);
@@ -69,6 +72,8 @@ export const setRoundYear = (roundId: string, year: number) => rpc<void>("set_ro
 export const openRound = (
   roomId: string,
   song: { spotifyTrackId: string | null; title: string; artist: string; year: number | null; imageUrl: string | null },
+  /** Lets the server fill in the year later (see /api/round-year). */
+  fillToken?: string,
 ) =>
   rpc<Round | null>("open_round", {
     p_room: roomId,
@@ -77,6 +82,7 @@ export const openRound = (
     p_artist: song.artist,
     p_year: song.year,
     p_image_url: song.imageUrl,
+    ...(fillToken ? { p_fill_token: fillToken } : {}),
   });
 
 export async function findRoomByCode(code: string): Promise<Room | null> {
@@ -111,7 +117,7 @@ async function loadRoom(roomId: string): Promise<RoomState | null> {
   }
   let secret: Secret | null = null;
   if (round.data) {
-    const s = await sb.from("round_secrets").select("*").eq("round_id", round.data.id).maybeSingle();
+    const s = await sb.from("round_secrets").select(SECRET_COLUMNS).eq("round_id", round.data.id).maybeSingle();
     secret = s.data;
   }
   const answers = round.data ? answerList.filter((a) => a.round_id === round.data!.id) : [];
@@ -126,6 +132,22 @@ async function loadRoom(roomId: string): Promise<RoomState | null> {
     years,
     cards: cardList,
   };
+}
+
+const BUILT = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_SHA;
+
+/**
+ * Reloads the page when a newer version of the site is live, so nobody plays a game with old
+ * rules after an update (phones keep tabs open for days).
+ */
+async function reloadIfOutdated() {
+  if (!BUILT || document.visibilityState !== "visible") return;
+  try {
+    const { version } = await (await fetch("/api/version", { cache: "no-store" })).json();
+    if (version && version !== BUILT) window.location.reload();
+  } catch {
+    // offline: try again next time
+  }
 }
 
 /** Live view of a room: loads everything, then reloads whenever anything in the room changes. */
@@ -153,7 +175,11 @@ export function useRoom(roomId: string | null) {
     channel.on("postgres_changes", { event: "*", schema: "public", table: "rooms", filter: `id=eq.${roomId}` }, soon);
     channel.subscribe();
     // Safety net in case a realtime event is missed (phones sleeping, flaky wifi).
-    const poll = setInterval(refresh, 10_000);
+    let ticks = 0;
+    const poll = setInterval(() => {
+      refresh();
+      if (++ticks % 3 === 0) reloadIfOutdated();
+    }, 10_000);
     const onVisible = () => document.visibilityState === "visible" && refresh();
     document.addEventListener("visibilitychange", onVisible);
     return () => {

@@ -128,7 +128,11 @@ function RevealPanel({ state, meId }: { state: RoomState; meId: string }) {
             <p className="truncate text-sm text-white/50">{secret.artist}</p>
           </div>
           {secret.year !== null ? (
-            <p className="text-3xl font-black" style={{ color: yearColor(secret.year) }}>
+            <p
+              className={`text-3xl font-black ${mine?.is_correct === false ? "text-bad" : ""}`}
+              // Red when you got it wrong, so a green-ish year colour doesn't read as "right".
+              style={mine?.is_correct === false ? undefined : { color: yearColor(secret.year) }}
+            >
               {secret.year}
             </p>
           ) : (

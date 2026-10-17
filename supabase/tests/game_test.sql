@@ -125,5 +125,27 @@ select (select is_correct from answers where round_id = :'r5') and
        (select count(*) from timeline_cards where round_id = :'r5') = 1 as ok_graded \gset
 \if :ok_graded \else \echo 'FAIL: pending guess not graded' \quit \endif
 
+-- The server fills a missing year with the round's token; a wrong token or a second fill is refused.
+select id as r6 from open_round(:'room3', 'trk6', 'Song F', 'Artist', null, null, '11111111-1111-1111-1111-111111111111') \gset
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+select submit_answer(:'r6', 0);
+reset role;
+set role anon;
+select not fill_round_year(:'r6', '22222222-2222-2222-2222-222222222222', 1950) as ok_badtoken \gset
+\if :ok_badtoken \else \echo 'FAIL: wrong token filled the year' \quit \endif
+select fill_round_year(:'r6', '11111111-1111-1111-1111-111111111111', 1970) as ok_fill \gset
+\if :ok_fill \else \echo 'FAIL: fill refused' \quit \endif
+select not fill_round_year(:'r6', '11111111-1111-1111-1111-111111111111', 1999) as ok_once \gset
+\if :ok_once \else \echo 'FAIL: filled twice' \quit \endif
+set role authenticated;
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+select is_correct and (select year from round_secrets where round_id = :'r6') = 1970 as ok_r6 from answers where round_id = :'r6' \gset
+\if :ok_r6 \else \echo 'FAIL: filled year not graded' \quit \endif
+do $$ begin
+  perform fill_token from round_secrets limit 1;
+  raise exception 'FAIL: token readable';
+exception when insufficient_privilege then null;
+end $$;
+
 select * from alltime_leaderboard order by wins desc;
 \echo 'ALL TESTS PASSED'

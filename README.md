@@ -13,7 +13,7 @@ Stack: Next.js 15 + Tailwind on Vercel, and Supabase (Postgres, Realtime, anonym
 
 ### 1. Supabase
 1. Create a free project at [supabase.com](https://supabase.com).
-2. **SQL Editor**: paste and run each file in `supabase/migrations/` in order (`0001_init.sql`, `0002_…`, `0003_…`).
+2. **SQL Editor**: paste and run each file in `supabase/migrations/` in order (`0001_init.sql`, `0002_…`, `0003_…`, `0004_…`).
 3. **Authentication → Sign In / Providers**: turn on **Allow anonymous sign-ins**.
 4. **Connect** (top of the dashboard): copy the Project URL and the publishable key (`sb_publishable_…`; the legacy `anon` key also works).
 
@@ -42,4 +42,4 @@ Open `/demo` (e.g. `track-record-green.vercel.app/demo`) for a clickable player 
 - `components/` and `app/`: the screens. Swap these for designs from v0 or any other tool.
 - `supabase/migrations/`: tables, security rules and the game logic (scoring, reveal, winner) as SQL functions, so players can't cheat from the browser.
 - `supabase/tests/`: `game_test.sql` plays a short game against a plain Postgres:
-  `psql -d test -f supabase/tests/shim.sql -f supabase/migrations/0001_init.sql -f supabase/migrations/0002_options_instant_reveal_stats.sql -f supabase/migrations/0003_year_pending.sql -f supabase/tests/game_test.sql`
+  `psql -d test -f supabase/tests/shim.sql -f supabase/migrations/0001_init.sql -f supabase/migrations/0002_options_instant_reveal_stats.sql -f supabase/migrations/0003_year_pending.sql -f supabase/migrations/0004_server_fills_year.sql -f supabase/tests/game_test.sql`

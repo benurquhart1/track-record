@@ -18,8 +18,8 @@ type YearResult = { year: number | null; source: string };
 type Track = { id: string; title: string; artist: string; isrc: string | null; albumYear: number | null };
 
 // Year lookups by Spotify track id. Queued songs are looked up ahead of time so their round
-// starts with the year already known; otherwise the round starts without it and the year is
-// filled in when the lookup finishes (guesses made meanwhile wait for it).
+// starts with the year already known; otherwise the round starts without it and the server
+// fills it in when its lookup finishes (guesses made meanwhile wait for it).
 const yearCache = new Map<string, Promise<YearResult>>();
 const yearsKnown = new Map<string, YearResult>();
 function yearFor(t: Track): Promise<YearResult> {
@@ -199,27 +199,32 @@ function HostGame({
         if (!np || !np.isPlaying || np.id === lastTrack.current) return;
         lastTrack.current = np.id;
         const title = cleanTitle(np.title);
-        const lookup = yearFor(np);
+        void yearFor(np);
         const known = yearsKnown.get(np.id);
         setYearSource(known?.source ?? null);
-        const song = { spotifyTrackId: np.id, title, artist: np.artist, imageUrl: np.imageUrl };
-        const opened = await openRound(room.id, { ...song, year: known?.year ?? null }).catch(async (e: Error) => {
-          // Databases without the 0003 migration need the year up front.
-          if (known || !e.message.includes("null value")) throw e;
-          const { year } = await lookup;
-          if (!year) throw new Error(`Couldn't find a year for "${title}", skipping it.`);
-          return openRound(room.id, { ...song, year });
+        const song = { spotifyTrackId: np.id, title, artist: np.artist, year: known?.year ?? null, imageUrl: np.imageUrl };
+        const token = known ? undefined : crypto.randomUUID();
+        const opened = await openRound(room.id, song, token).catch((e: Error) => {
+          // Databases without the 0004 migration don't take a token; the host fills the year instead.
+          if (!token || !/p_fill_token|function/i.test(e.message)) throw e;
+          return openRound(room.id, song);
         });
         setError(null);
         setPeek(false);
         await refresh();
-        // Fill the year in when the lookup lands, without holding up the next Spotify check.
+        // The server looks the year up and fills it in, so it lands even if this phone locks.
         if (!known && opened) {
-          lookup
-            .then(async ({ year, source }) => {
+          fetch("/api/round-year", {
+            method: "POST",
+            keepalive: true,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ roundId: opened.id, token, title, artist: np.artist, isrc: np.isrc, spotifyYear: np.albumYear }),
+          })
+            .then((res) => res.json())
+            .then(async ({ year, source, filled }: YearResult & { filled: boolean }) => {
               setYearSource(source);
-              if (year) await setRoundYear(opened.id, year);
-              else setError(`Couldn't find a year for "${title}". Peek and enter it below.`);
+              if (year && !filled) await setRoundYear(opened.id, year);
+              if (!year) setError(`Couldn't find a year for "${title}". Peek and enter it below.`);
               await refresh();
             })
             .catch((e: Error) => setError(e.message));
@@ -246,6 +251,41 @@ function HostGame({
       clearInterval(ahead);
     };
   }, [spotify, finished, room.id, refresh]);
+
+  // Keep the screen on: the host's phone drives the game, and a locked phone stops spotting new songs.
+  useEffect(() => {
+    let lock: WakeLockSentinel | null = null;
+    const grab = () => {
+      if (document.visibilityState === "visible" && "wakeLock" in navigator) {
+        navigator.wakeLock.request("screen").then((l) => (lock = l)).catch(() => {});
+      }
+    };
+    grab();
+    document.addEventListener("visibilitychange", grab);
+    return () => {
+      document.removeEventListener("visibilitychange", grab);
+      lock?.release().catch(() => {});
+    };
+  }, []);
+
+  // Backstop for a round still missing its year (say the server's fill never got sent): look it
+  // up here and set it.
+  const rescued = useRef<string | null>(null);
+  const missingYear = secret && secret.year === null ? secret : null;
+  useEffect(() => {
+    if (!missingYear || rescued.current === missingYear.round_id) return;
+    const id = setTimeout(async () => {
+      rescued.current = missingYear.round_id;
+      const { year, source } = await resolveYear(missingYear.title, missingYear.artist, null, null);
+      setYearSource(source);
+      if (year) await setRoundYear(missingYear.round_id, year).catch((e: Error) => setError(e.message));
+      else setError(`Couldn't find a year for "${missingYear.title}". Peek and enter it below.`);
+      await refresh();
+    }, 15_000);
+    return () => clearTimeout(id);
+    // Keyed on the round, not the object: the room reloads every few seconds.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missingYear?.round_id, refresh]);
 
   // Reveal as soon as everyone has locked in.
   const revealed = useRef<string | null>(null);
