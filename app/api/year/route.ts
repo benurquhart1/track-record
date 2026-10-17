@@ -167,11 +167,15 @@ export async function GET(req: Request) {
     }
   }
 
-  // The earliest trustworthy year: a single by the artist, or a year at least two releases agree
-  // on. One mis-dated compilation shouldn't win (Crazy in Love has a lone "1999" entry), but a
+  // The earliest trustworthy year: a single by the artist, an original release, or a year at
+  // least two releases agree on. One mis-dated compilation shouldn't win (Crazy in Love has a lone "1999" entry), but a
   // lone original single should (What a Wonderful World's 1967 single vs its 1988 re-release).
   const sorted = [...found].sort((a, b) => a.year - b.year);
-  const trusted = (f: Found) => f.from === "single" || found.filter((g) => g.year === f.year).length >= 2;
+  // An original album, single or EP (no compilation/live/soundtrack tag) counts on its own too:
+  // Celia Cruz's Guantanamera is on her 1967 album "Bravo" and nothing else until 1971.
+  const original = (f: Found) => !!f.kind && ["Album", "Single", "EP"].includes(f.kind);
+  const trusted = (f: Found) =>
+    f.from === "single" || original(f) || found.filter((g) => g.year === f.year).length >= 2;
   const first = sorted.find(trusted) ?? sorted[0];
   const year = first?.year ?? null;
   // Very old records often only show up on later compilations (Joseíto Fernández's 1929
