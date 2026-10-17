@@ -105,8 +105,7 @@ const lucene = (s: string) => s.replace(/["\\]/g, "");
 type WikiRow = { label?: { value: string }; who?: { value: string }; pub?: { value: string }; inc?: { value: string } };
 
 /** Earliest date Wikidata gives for a song with this title that the artist wrote or performed. */
-type WikiResult = { year: number; label: string } | null;
-async function wikidataYear(title: string, artist: string, diag: string[] = []): Promise<WikiResult> {
+async function wikidataYear(title: string, artist: string): Promise<{ year: number; label: string } | null> {
   const esc = (x: string) => x.replace(/["\\]/g, "");
   const query = `SELECT ?label ?who ?pub ?inc WHERE {
     SERVICE wikibase:mwapi {
@@ -125,12 +124,8 @@ async function wikidataYear(title: string, artist: string, diag: string[] = []):
       signal: AbortSignal.timeout(8000),
       cache: "no-store",
     });
-    if (!res.ok) {
-      diag.push(`http ${res.status}`);
-      return null;
-    }
+    if (!res.ok) return null;
     const rows = ((await res.json())?.results?.bindings ?? []) as WikiRow[];
-    diag.push(`${rows.length} rows`, ...rows.slice(0, 12).map((r) => `${r.label?.value} | ${r.who?.value} | ${r.pub?.value ?? ""} | ${r.inc?.value ?? ""}`));
     let best: { year: number; label: string } | null = null;
     for (const r of rows) {
       if (!r.label || !r.who || norm(cleanTitle(r.label.value)) !== norm(title) || norm(r.who.value) !== norm(artist)) continue;
@@ -140,8 +135,7 @@ async function wikidataYear(title: string, artist: string, diag: string[] = []):
       }
     }
     return best;
-  } catch (e) {
-    diag.push(`error ${(e as Error).message}`);
+  } catch {
     return null;
   }
 }
@@ -182,8 +176,7 @@ export async function GET(req: Request) {
     t.split(/\s+\/\s+/).some((part) => norm(cleanTitle(part)) === songKey || bare(part) === bare(title));
 
   // Runs alongside the MusicBrainz calls; it has no rate limit to queue for.
-  const wikiDiag: string[] = [];
-  const wiki = songKey && artist ? wikidataYear(title, artist, wikiDiag) : Promise.resolve(null);
+  const wiki = songKey && artist ? wikidataYear(title, artist) : Promise.resolve(null);
 
   // 1. The exact recording Spotify is playing.
   if (isrc) {
@@ -248,7 +241,6 @@ export async function GET(req: Request) {
         wikidata: earliestFrom("wikidata"),
       },
       oldest: sorted.slice(0, 8),
-      wikidata: wikiDiag,
     });
   }
   return NextResponse.json(result);
