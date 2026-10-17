@@ -1,9 +1,9 @@
-import { standings, type RoomState } from "@/lib/game";
+import { lockedInIds, standings, type RoomState } from "@/lib/game";
 import { playerStats, type PlayerStats } from "@/lib/stats";
 
 export function Leaderboard({ state, meId }: { state: RoomState; meId?: string }) {
   const rows = standings(state);
-  const answered = new Set(state.answers.map((a) => a.player_id));
+  const answered = lockedInIds(state);
   const open = state.round?.status === "open";
   return (
     <ol className="space-y-2">

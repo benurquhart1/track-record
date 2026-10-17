@@ -50,6 +50,8 @@ export type RoomState = {
   history: Answer[];
   /** Real year of every round whose song this player can see. */
   years: Record<string, number>;
+  /** Players who've guessed the current song (everyone can see who, not what). */
+  lockedIn?: string[];
   cards: Card[];
 };
 
@@ -121,6 +123,11 @@ async function loadRoom(roomId: string): Promise<RoomState | null> {
     secret = s.data;
   }
   const answers = round.data ? answerList.filter((a) => a.round_id === round.data!.id) : [];
+  let lockedIn = answers.map((a) => a.player_id);
+  if (round.data?.status === "open") {
+    const { data, error } = await sb.rpc("locked_in", { p_round: round.data.id });
+    if (!error && Array.isArray(data)) lockedIn = data as string[];
+  }
   return {
     room: room.data,
     players: players.data ?? [],
@@ -130,6 +137,7 @@ async function loadRoom(roomId: string): Promise<RoomState | null> {
     rounds: roundList,
     history: answerList,
     years,
+    lockedIn,
     cards: cardList,
   };
 }
@@ -191,6 +199,10 @@ export function useRoom(roomId: string | null) {
   }, [roomId, refresh]);
 
   return { state, refresh };
+}
+
+export function lockedInIds(state: RoomState): Set<string> {
+  return new Set(state.lockedIn ?? state.answers.map((a) => a.player_id));
 }
 
 export function cardsOf(state: RoomState, playerId: string): Card[] {

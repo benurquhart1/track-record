@@ -147,5 +147,20 @@ do $$ begin
 exception when insufficient_privilege then null;
 end $$;
 
+-- Players see who has locked in for an open round, even though they can't see the guesses.
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000c';
+select id as bob3 from join_room(:'code3', 'Bob') \gset
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+select id as r7 from open_round(:'room3', 'trk7', 'Song G', 'Artist', 2000, null) \gset
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+select submit_answer(:'r7', 0);
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000c';
+select (select count(*) from locked_in(:'r7')) = 1 and (select count(*) from answers where round_id = :'r7') = 0 as ok_locked \gset
+\if :ok_locked \else \echo 'FAIL: locked_in' \quit \endif
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000d';
+select count(*) = 0 as ok_outsider from locked_in(:'r7') \gset
+\if :ok_outsider \else \echo 'FAIL: outsider sees locked_in' \quit \endif
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+
 select * from alltime_leaderboard order by wins desc;
 \echo 'ALL TESTS PASSED'

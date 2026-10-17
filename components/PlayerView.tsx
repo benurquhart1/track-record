@@ -5,7 +5,7 @@ import { Leaderboard } from "@/components/Leaderboard";
 import { Timeline } from "@/components/Timeline";
 import { Button, ErrorText, Panel } from "@/components/ui";
 import { yearColor } from "@/lib/colors";
-import { cardsOf, type RoomState } from "@/lib/game";
+import { cardsOf, lockedInIds, type RoomState } from "@/lib/game";
 import { missBy } from "@/lib/stats";
 
 /** The player's whole game screen. Pure UI: data comes in, the guess goes out. */
@@ -36,6 +36,8 @@ export function PlayerView({
     try {
       await onLockIn(round.id, slot);
       setError(null);
+      // The guessing controls collapse into the result, so bring the result into view.
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -140,7 +142,9 @@ function RevealPanel({ state, meId }: { state: RoomState; meId: string }) {
           )}
         </div>
       )}
-      <p className="mt-3 text-sm text-white/50">{stillOpen ? "Others are still guessing. Keep it quiet!" : "Waiting for the next song…"}</p>
+      <p className="mt-3 text-sm text-white/50">{stillOpen
+          ? `${lockedInIds(state).size}/${state.players.length} locked in. Keep it quiet!`
+          : "Waiting for the next song…"}</p>
     </Panel>
   );
 }
