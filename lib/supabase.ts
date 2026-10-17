@@ -19,6 +19,13 @@ export async function ensureSession(): Promise<string> {
   const { data } = await sb.auth.getSession();
   if (data.session) return data.session.user.id;
   const { data: signedIn, error } = await sb.auth.signInAnonymously();
+  if (error && /api key/i.test(error.message)) {
+    // Show what the site was built with, so a mistyped Vercel variable is easy to spot.
+    const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY ?? process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+    throw new Error(
+      `${error.message}. This site was built with URL "${process.env.NEXT_PUBLIC_SUPABASE_URL}" and key "${key.slice(0, 20)}…${key.slice(-4)}" (${key.length} characters).`,
+    );
+  }
   if (error || !signedIn.user) throw error ?? new Error("Couldn't sign in");
   return signedIn.user.id;
 }
