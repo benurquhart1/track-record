@@ -5,14 +5,31 @@ import { Leaderboard } from "@/components/Leaderboard";
 import { QrCode } from "@/components/QrCode";
 import { Button, ErrorText, Panel } from "@/components/ui";
 import { closeRound, createRoom, endGame, openRound, setRoundYear, standings, useRoom } from "@/lib/game";
-import { getNowPlaying, isLoggedIn, logout, startLogin } from "@/lib/spotify";
+import { getNowPlaying, getQueue, isLoggedIn, logout, startLogin } from "@/lib/spotify";
 import { ensureSession } from "@/lib/supabase";
 import { cleanTitle } from "@/lib/year";
 
 const ROOM_KEY = "host_room_id";
-const POLL_MS = 4000;
+const POLL_MS = 1500;
+/** How often to look ahead in the Spotify queue and pre-fetch the next songs' years. */
+const QUEUE_MS = 10_000;
 
-async function resolveYear(title: string, artist: string, isrc: string | null, spotifyYear: number | null) {
+type YearResult = { year: number | null; source: string };
+type Track = { id: string; title: string; artist: string; isrc: string | null; albumYear: number | null };
+
+// Year lookups by Spotify track id. Queued songs are looked up ahead of time, so when one starts
+// playing its round opens straight away instead of waiting several seconds on MusicBrainz.
+const yearCache = new Map<string, Promise<YearResult>>();
+function yearFor(t: Track): Promise<YearResult> {
+  let p = yearCache.get(t.id);
+  if (!p) {
+    p = resolveYear(cleanTitle(t.title), t.artist, t.isrc, t.albumYear);
+    yearCache.set(t.id, p);
+  }
+  return p;
+}
+
+async function resolveYear(title: string, artist: string, isrc: string | null, spotifyYear: number | null): Promise<YearResult> {
   const q = new URLSearchParams({ title, artist, ...(isrc ? { isrc } : {}), ...(spotifyYear ? { spotifyYear: String(spotifyYear) } : {}) });
   try {
     const res = await fetch(`/api/year?${q}`);
@@ -177,7 +194,7 @@ function HostGame({
         if (!np || !np.isPlaying || np.id === lastTrack.current) return;
         lastTrack.current = np.id;
         const title = cleanTitle(np.title);
-        const { year, source } = await resolveYear(title, np.artist, np.isrc, np.albumYear);
+        const { year, source } = await yearFor(np);
         setYearSource(source);
         if (!year) {
           setError(`Couldn't find a year for "${title}", skipping it.`);
@@ -195,11 +212,18 @@ function HostGame({
         busy.current = false;
       }
     };
+    const lookAhead = () =>
+      getQueue()
+        .then((next) => next.forEach((t) => void yearFor(t)))
+        .catch(() => {});
     tick();
+    lookAhead();
     const id = setInterval(tick, POLL_MS);
+    const ahead = setInterval(lookAhead, QUEUE_MS);
     return () => {
       stopped = true;
       clearInterval(id);
+      clearInterval(ahead);
     };
   }, [spotify, finished, room.id, refresh]);
 

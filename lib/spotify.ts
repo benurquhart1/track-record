@@ -102,6 +102,11 @@ export async function getNowPlaying(): Promise<NowPlaying | null> {
   const json = await res.json();
   const item = json.item;
   if (!item || json.currently_playing_type !== "track") return null;
+  return { ...toTrack(item), isPlaying: !!json.is_playing };
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function toTrack(item: any): Omit<NowPlaying, "isPlaying"> {
   const year = parseInt(String(item.album?.release_date ?? "").slice(0, 4), 10);
   return {
     id: item.id,
@@ -110,6 +115,18 @@ export async function getNowPlaying(): Promise<NowPlaying | null> {
     albumYear: Number.isFinite(year) ? year : null,
     isrc: item.external_ids?.isrc ?? null,
     imageUrl: item.album?.images?.[0]?.url ?? null,
-    isPlaying: !!json.is_playing,
   };
+}
+
+/** The next few tracks in the host's queue, so their years can be looked up before they play. */
+export async function getQueue(limit = 2): Promise<Omit<NowPlaying, "isPlaying">[]> {
+  const res = await fetch("https://api.spotify.com/v1/me/player/queue", {
+    headers: { Authorization: `Bearer ${await accessToken()}` },
+  });
+  if (!res.ok) return [];
+  const json = await res.json();
+  return (json.queue ?? [])
+    .filter((t: { type?: string; id?: string }) => t?.type === "track" && t.id)
+    .slice(0, limit)
+    .map(toTrack);
 }
