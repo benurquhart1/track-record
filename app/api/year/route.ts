@@ -4,7 +4,7 @@ import { cleanTitle, firstArtist } from "@/lib/year";
 // Spotify reports the year of the album version playing, so remasters and compilations
 // come out too late. MusicBrainz knows each recording's first release; take the earliest.
 
-const UA = "hitster-party/0.1 (private party game)";
+const UA = "track-record/0.1 (private party game)";
 
 type Recording = { "first-release-date"?: string; score?: number };
 

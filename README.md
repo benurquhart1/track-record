@@ -1,6 +1,6 @@
-# Hitster Party
+# Track Record
 
-A phone-friendly take on Hitster for parties. Whatever the host is playing on Spotify becomes the mystery card. Everyone guesses where it fits in their own timeline at the same time. A correct guess keeps the card and a wrong one loses it, and the first player to reach the target number of cards wins.
+A phone-friendly party game inspired by Hitster. Whatever the host is playing on Spotify becomes the mystery card. Everyone guesses where it fits in their own timeline at the same time. A correct guess keeps the card and a wrong one loses it, and the first player to reach the target number of cards wins.
 
 - **Host**: signs in with Spotify (PKCE, no secret) on a laptop or phone and shows the game code / QR. Each new song automatically starts a round and reveals the last one.
 - **Players**: open the link, type a name, and place songs. No Spotify account is needed.

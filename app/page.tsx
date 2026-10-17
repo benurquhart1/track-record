@@ -13,7 +13,7 @@ export default function Home() {
     <div className="space-y-6">
       <header className="pt-8 text-center">
         <h1 className="text-5xl font-black tracking-tight">
-          Hitster <span className="text-accent">Party</span>
+          Track <span className="text-accent">Record</span>
         </h1>
         <p className="mt-3 text-white/60">Guess the year of whatever&apos;s playing. Build the longest timeline.</p>
       </header>

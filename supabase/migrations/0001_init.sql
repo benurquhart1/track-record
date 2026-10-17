@@ -1,4 +1,4 @@
--- Hitster party: schema, row-level security and game functions.
+-- Track Record: schema, row-level security and game functions.
 -- Run once in the Supabase SQL editor (or `supabase db push`).
 -- Requires Authentication > Sign In / Providers > "Allow anonymous sign-ins" to be on.
 
