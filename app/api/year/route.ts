@@ -17,7 +17,12 @@ export const maxDuration = 30;
 const UA = "track-record/0.3 (private party game; github.com/benurquhart1/track-record)";
 
 type Credit = { name?: string; artist?: { id?: string; name?: string } }[];
-type Release = { date?: string; status?: string };
+type Release = {
+  title?: string;
+  date?: string;
+  status?: string;
+  "release-group"?: { "primary-type"?: string; "secondary-types"?: string[] };
+};
 type Recording = {
   title?: string;
   disambiguation?: string;
@@ -27,7 +32,7 @@ type Recording = {
 };
 type ReleaseGroup = { title?: string; "first-release-date"?: string };
 type Artist = { id: string; name: string; score?: number };
-type Found = { from: string; title: string; year: number };
+type Found = { from: string; title: string; year: number; release?: string; kind?: string };
 
 function yearOf(date?: string): number | null {
   const y = parseInt((date ?? "").slice(0, 4), 10);
@@ -75,16 +80,21 @@ function mb(path: string): Promise<any | null> {
  * Years a recording came out, counting only official releases: demos and bootlegs often carry
  * dates from before the song was really released (Mr. Brightside demos show up as 2001).
  */
-function recordingYears(r: Recording): number[] {
+type Dated = { year: number; release?: string; kind?: string };
+function recordingYears(r: Recording): Dated[] {
   if (/\b(demo|rehearsal|outtake)\b/i.test(r.disambiguation ?? "")) return [];
   if (r.releases?.length) {
     return r.releases
       .filter((rel) => !rel.status || rel.status === "Official")
-      .map((rel) => yearOf(rel.date))
-      .filter((y): y is number => y !== null);
+      .map((rel) => {
+        const g = rel["release-group"];
+        const kind = [g?.["primary-type"], ...(g?.["secondary-types"] ?? [])].filter(Boolean).join("+");
+        return { year: yearOf(rel.date) ?? 0, release: rel.title, kind: kind || undefined };
+      })
+      .filter((d) => d.year > 0);
   }
   const y = yearOf(r["first-release-date"]);
-  return y ? [y] : [];
+  return y ? [{ year: y }] : [];
 }
 
 const lucene = (s: string) => s.replace(/["\\]/g, "");
@@ -107,8 +117,8 @@ export async function GET(req: Request) {
     const year = yearOf(date);
     if (year) found.push({ from, title: t ?? "", year });
   };
-  const addYears = (from: string, t: string | undefined, years: number[]) => {
-    for (const year of years) found.push({ from, title: t ?? "", year });
+  const addYears = (from: string, t: string | undefined, dated: Dated[]) => {
+    for (const d of dated) found.push({ from, title: t ?? "", ...d });
   };
   // Any step MusicBrainz didn't answer makes the result incomplete: use it, but don't cache it.
   let incomplete = false;
@@ -179,7 +189,7 @@ export async function GET(req: Request) {
       artistId,
       incomplete,
       earliest: { isrc: earliestFrom("isrc"), single: earliestFrom("single"), recording: earliestFrom("recording") },
-      oldest: sorted.slice(0, 5),
+      oldest: sorted.slice(0, 8),
     });
   }
   return NextResponse.json(result);
