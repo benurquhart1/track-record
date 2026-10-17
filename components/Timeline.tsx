@@ -1,8 +1,14 @@
+"use client";
+
+import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import type { Card } from "@/lib/game";
 import { yearColor } from "@/lib/colors";
 
 /**
- * A player's cards newest-first, with a "place here" gap between each pair when picking.
+ * A player's cards newest-first. While picking, a mystery card can be dragged into the timeline,
+ * or the player taps anywhere on it and the card drops into the nearest gap. The other cards stay
+ * packed together; only the chosen spot opens up.
+ *
  * Slots are numbered oldest-first to match the server: slot i sits just before the i-th oldest
  * card, and slot = cards.length is above the newest.
  */
@@ -21,30 +27,111 @@ export function Timeline({
 }) {
   const newestFirst = [...cards].sort((a, b) => b.year - a.year);
   const n = cards.length;
+  const listRef = useRef<HTMLOListElement>(null);
+  const [drag, setDrag] = useState<{ x: number; y: number; startY: number; slot: number } | null>(null);
 
-  const slot = (s: number) =>
-    picking ? (
-      <button
-        key={`slot-${s}`}
-        onClick={() => onPick?.(s)}
-        className={`my-1 w-full rounded-xl border-2 border-dashed py-3 text-sm font-semibold transition ${
-          selected === s ? "border-accent bg-accent/20 text-white" : "border-line text-white/50"
-        }`}
-      >
-        {selected === s ? "Mystery song goes here" : "Place here"}
-      </button>
+  // Rows whose middle is above the pointer sit above the drop point; the rest go below it.
+  const slotAt = (clientY: number): number => {
+    const rows = listRef.current?.querySelectorAll<HTMLElement>("[data-row]") ?? [];
+    let above = 0;
+    rows.forEach((row) => {
+      const r = row.getBoundingClientRect();
+      if (clientY > r.top + r.height / 2) above++;
+    });
+    return n - above;
+  };
+
+  const startDrag = (e: ReactPointerEvent) => {
+    e.preventDefault();
+    setDrag({ x: e.clientX, y: e.clientY, startY: e.clientY, slot: selected ?? slotAt(e.clientY) });
+  };
+
+  // Track the pointer on the window: the card under the finger re-renders as a floating copy
+  // mid-drag, so listeners on the card itself would stop firing.
+  const lastDragEnd = useRef(0);
+  const dragRef = useRef(drag);
+  dragRef.current = drag;
+  const dragActive = drag !== null;
+  useEffect(() => {
+    if (!dragActive) return;
+    const move = (e: PointerEvent) =>
+      setDrag((d) => (d ? { ...d, x: e.clientX, y: e.clientY, slot: slotAt(e.clientY) } : d));
+    const up = () => {
+      const d = dragRef.current;
+      if (d && Math.abs(d.y - d.startY) > 6) {
+        lastDragEnd.current = Date.now();
+        onPick?.(d.slot);
+      }
+      setDrag(null);
+    };
+    const cancel = () => setDrag(null);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", cancel);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", cancel);
+    };
+    // slotAt and onPick only read refs/props that are stable for the length of one drag.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dragActive]);
+
+  const dragging = drag !== null && Math.abs(drag.y - drag.startY) > 6;
+  // Where the mystery card shows in the newest-first list (display index), if anywhere.
+  const shownAt = picking && !dragging && selected !== null ? n - selected : null;
+  const indicatorAt = dragging ? n - drag.slot : null;
+
+  const mystery = (
+    <div
+      key="mystery"
+      onPointerDown={startDrag}
+      onClick={(e) => e.stopPropagation()}
+      className="my-1 flex cursor-grab touch-none select-none items-center gap-3 rounded-xl border-2 border-dashed border-accent bg-accent/15 px-3 py-2 active:cursor-grabbing"
+    >
+      <span className="w-14 shrink-0 text-2xl font-black text-accent">????</span>
+      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-accent/30 text-xl font-black">?</span>
+      <span className="min-w-0 flex-1">
+        <span className="block font-semibold">Mystery song</span>
+        <span className="block text-sm text-white/60">{selected === null ? "Drag it into your timeline, or tap a gap" : "Drag to move it"}</span>
+      </span>
+      <svg aria-hidden="true" width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="2" className="shrink-0 text-white/50">
+        <path d="M6 7h8M6 10h8M6 13h8" strokeLinecap="round" />
+      </svg>
+    </div>
+  );
+
+  const indicator = (i: number) =>
+    indicatorAt === i ? (
+      <li key={`ind-${i}`} aria-hidden="true" className="relative h-0">
+        <span className="absolute inset-x-0 -top-px h-1 -translate-y-1/2 rounded-full bg-accent shadow-[0_0_12px_var(--color-accent)]" />
+      </li>
     ) : null;
 
   return (
-    <ol>
-      {slot(n)}
-      {newestFirst.map((c, i) => (
-        <li key={c.id}>
-          <TimelineRow card={c} highlight={c.id === highlightId} />
-          {slot(n - 1 - i)}
-        </li>
-      ))}
-    </ol>
+    <div>
+      {picking && selected === null && !dragging && <div className="mb-3">{mystery}</div>}
+      <ol
+        ref={listRef}
+        onClick={picking ? (e) => Date.now() - lastDragEnd.current > 300 && onPick?.(slotAt(e.clientY)) : undefined}
+        className={picking ? "cursor-pointer" : undefined}
+      >
+        {newestFirst.map((c, i) => [
+          indicator(i),
+          shownAt === i ? <li key="mystery-slot">{mystery}</li> : null,
+          <li key={c.id} data-row>
+            <TimelineRow card={c} highlight={c.id === highlightId} />
+          </li>,
+        ])}
+        {indicator(n)}
+        {shownAt === n ? <li key="mystery-slot">{mystery}</li> : null}
+      </ol>
+      {dragging && (
+        <div className="pointer-events-none fixed left-4 right-4 z-50 mx-auto max-w-md rounded-xl bg-ink shadow-2xl shadow-black" style={{ top: drag.y - 30 }}>
+          {mystery}
+        </div>
+      )}
+    </div>
   );
 }
 

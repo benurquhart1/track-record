@@ -52,7 +52,7 @@ export function PlayerView({
         <Panel className="text-center">
           <p className="text-sm font-semibold text-white/50">Song {round.number}</p>
           <p className="mt-1 text-2xl font-black">When was this released?</p>
-          <p className="mt-1 text-white/60">Tap where it fits in your timeline.</p>
+          <p className="mt-1 text-white/60">Drag the mystery song into place, or tap between two cards.</p>
         </Panel>
       ) : (
         <RevealPanel state={state} meId={meId} />
