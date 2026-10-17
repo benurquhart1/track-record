@@ -10,6 +10,9 @@ import { cleanTitle, firstArtist } from "@/lib/year";
 //   1. the exact recording Spotify is playing (by ISRC),
 //   2. every single the artist released (browsed, not searched) whose title is this song,
 //   3. every recording of the song credited to that exact artist.
+// Wikidata is checked alongside for songs this artist wrote or originally performed, since
+// MusicBrainz often only has reissues of very old records (Joseíto Fernández's Guantanamera,
+// from 1929, only appears there on a 1997 compilation).
 
 // A lookup is several MusicBrainz calls a second apart; give it room past the default timeout.
 export const maxDuration = 30;
@@ -99,6 +102,44 @@ function recordingYears(r: Recording): Dated[] {
 
 const lucene = (s: string) => s.replace(/["\\]/g, "");
 
+type WikiRow = { label?: { value: string }; who?: { value: string }; pub?: { value: string }; inc?: { value: string } };
+
+/** Earliest date Wikidata gives for a song with this title that the artist wrote or performed. */
+async function wikidataYear(title: string, artist: string): Promise<{ year: number; label: string } | null> {
+  const esc = (x: string) => x.replace(/["\\]/g, "");
+  const query = `SELECT ?label ?who ?pub ?inc WHERE {
+    SERVICE wikibase:mwapi {
+      bd:serviceParam wikibase:endpoint "www.wikidata.org"; wikibase:api "EntitySearch";
+        mwapi:search "${esc(title)}"; mwapi:language "en"; mwapi:limit "20".
+      ?item wikibase:apiOutputItem mwapi:item.
+    }
+    ?item rdfs:label ?label . FILTER(lang(?label) = "en" || lang(?label) = "es")
+    ?item wdt:P175|wdt:P86|wdt:P676 ?person . ?person rdfs:label ?who . FILTER(lang(?who) = "en" || lang(?who) = "es")
+    OPTIONAL { ?item wdt:P577 ?pub }
+    OPTIONAL { ?item wdt:P571 ?inc }
+  } LIMIT 200`;
+  try {
+    const res = await fetch(`https://query.wikidata.org/sparql?query=${encodeURIComponent(query)}`, {
+      headers: { "User-Agent": UA, Accept: "application/sparql-results+json" },
+      signal: AbortSignal.timeout(8000),
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const rows = ((await res.json())?.results?.bindings ?? []) as WikiRow[];
+    let best: { year: number; label: string } | null = null;
+    for (const r of rows) {
+      if (!r.label || !r.who || norm(cleanTitle(r.label.value)) !== norm(title) || norm(r.who.value) !== norm(artist)) continue;
+      for (const d of [r.pub?.value, r.inc?.value]) {
+        const year = yearOf(d);
+        if (year && (!best || year < best.year)) best = { year, label: r.label.value };
+      }
+    }
+    return best;
+  } catch {
+    return null;
+  }
+}
+
 export async function GET(req: Request) {
   const q = new URL(req.url).searchParams;
   const debug = !!q.get("debug");
@@ -133,6 +174,9 @@ export async function GET(req: Request) {
   const sameSong = (t?: string) =>
     !!t &&
     t.split(/\s+\/\s+/).some((part) => norm(cleanTitle(part)) === songKey || bare(part) === bare(title));
+
+  // Runs alongside the MusicBrainz calls; it has no rate limit to queue for.
+  const wiki = songKey && artist ? wikidataYear(title, artist) : Promise.resolve(null);
 
   // 1. The exact recording Spotify is playing.
   if (isrc) {
@@ -170,8 +214,10 @@ export async function GET(req: Request) {
   // The earliest trustworthy year: a single by the artist, or a year at least two releases agree
   // on. One mis-dated compilation shouldn't win (Crazy in Love has a lone "1999" entry), but a
   // lone original single should (What a Wonderful World's 1967 single vs its 1988 re-release).
+  const w = await wiki;
+  if (w) found.push({ from: "wikidata", title: w.label, year: w.year });
   const sorted = [...found].sort((a, b) => a.year - b.year);
-  const trusted = (f: Found) => f.from === "single" || found.filter((g) => g.year === f.year).length >= 2;
+  const trusted = (f: Found) => f.from === "single" || f.from === "wikidata" || found.filter((g) => g.year === f.year).length >= 2;
   const first = sorted.find(trusted) ?? sorted[0];
   const year = first?.year ?? null;
   const result = first
@@ -188,7 +234,12 @@ export async function GET(req: Request) {
       ...result,
       artistId,
       incomplete,
-      earliest: { isrc: earliestFrom("isrc"), single: earliestFrom("single"), recording: earliestFrom("recording") },
+      earliest: {
+        isrc: earliestFrom("isrc"),
+        single: earliestFrom("single"),
+        recording: earliestFrom("recording"),
+        wikidata: earliestFrom("wikidata"),
+      },
       oldest: sorted.slice(0, 8),
     });
   }
