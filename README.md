@@ -15,7 +15,7 @@ Stack: Next.js 15 + Tailwind on Vercel, and Supabase (Postgres, Realtime, anonym
 1. Create a free project at [supabase.com](https://supabase.com).
 2. **SQL Editor**: paste and run `supabase/migrations/0001_init.sql`.
 3. **Authentication → Sign In / Providers**: turn on **Allow anonymous sign-ins**.
-4. **Project Settings → API**: copy the Project URL and the `anon` public key.
+4. **Connect** (top of the dashboard): copy the Project URL and the publishable key (`sb_publishable_…`; the legacy `anon` key also works).
 
 ### 2. Spotify
 1. Create an app at [developer.spotify.com/dashboard](https://developer.spotify.com/dashboard) and tick **Web API**.
