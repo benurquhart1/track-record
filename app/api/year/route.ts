@@ -153,7 +153,11 @@ export async function GET(req: Request) {
     }
   }
 
-  const first = [...found].sort((a, b) => a.year - b.year)[0];
+  // The earliest year at least two releases agree on: one mis-dated compilation shouldn't win
+  // (Crazy in Love has a single "1999" entry). With only one-offs, take the earliest.
+  const sorted = [...found].sort((a, b) => a.year - b.year);
+  const count = (y: number) => found.filter((f) => f.year === y).length;
+  const first = sorted.find((f) => count(f.year) >= 2) ?? sorted[0];
   const year = first?.year ?? null;
   const result = first
     ? { year: first.year, source: "musicbrainz", matched: first.title }
@@ -170,7 +174,7 @@ export async function GET(req: Request) {
       artistId,
       incomplete,
       earliest: { isrc: earliestFrom("isrc"), single: earliestFrom("single"), recording: earliestFrom("recording") },
-      oldest: [...found].sort((a, b) => a.year - b.year).slice(0, 5),
+      oldest: sorted.slice(0, 5),
     });
   }
   return NextResponse.json(result);
