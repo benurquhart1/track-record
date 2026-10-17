@@ -14,7 +14,14 @@ import { cleanTitle, firstArtist } from "@/lib/year";
 const UA = "track-record/0.3 (private party game; github.com/benurquhart1/track-record)";
 
 type Credit = { name?: string; artist?: { id?: string; name?: string } }[];
-type Recording = { title?: string; "first-release-date"?: string; releases?: { date?: string }[]; "artist-credit"?: Credit };
+type Release = { date?: string; status?: string };
+type Recording = {
+  title?: string;
+  disambiguation?: string;
+  "first-release-date"?: string;
+  releases?: Release[];
+  "artist-credit"?: Credit;
+};
 type ReleaseGroup = { title?: string; "first-release-date"?: string };
 type Artist = { id: string; name: string; score?: number };
 type Found = { from: string; title: string; year: number };
@@ -27,29 +34,54 @@ function yearOf(date?: string): number | null {
 const norm = (s: string) =>
   s.toLowerCase().normalize("NFKD").replace(/&/g, "and").replace(/[^a-z0-9]/g, "");
 
-let lastCall = 0;
 const cache = new Map<string, { year: number | null; source: string; matched: string | null }>();
 
+// MusicBrainz allows about one request a second, so every call waits its turn in one queue.
+let queue: Promise<unknown> = Promise.resolve();
+let lastCall = 0;
+const gap = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** null = not found; throws when MusicBrainz couldn't be reached, so a partial answer isn't cached. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function mb(path: string): Promise<any | null> {
-  for (let attempt = 0; attempt < 2; attempt++) {
-    // Stay under MusicBrainz's limit of about one request a second.
-    const wait = lastCall + 1050 - Date.now();
-    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-    lastCall = Date.now();
-    try {
-      const res = await fetch(`https://musicbrainz.org/ws/2/${path}`, {
-        headers: { "User-Agent": UA, Accept: "application/json" },
-        signal: AbortSignal.timeout(6000),
-        cache: "no-store",
-      });
-      if (res.ok) return await res.json();
-      if (res.status !== 503) return null;
-    } catch {
-      // timeout or network error: retry once
+function mb(path: string): Promise<any | null> {
+  const run = async () => {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const wait = lastCall + 1100 * (attempt + 1) - Date.now();
+      if (wait > 0) await gap(wait);
+      lastCall = Date.now();
+      try {
+        const res = await fetch(`https://musicbrainz.org/ws/2/${path}`, {
+          headers: { "User-Agent": UA, Accept: "application/json" },
+          signal: AbortSignal.timeout(6000),
+          cache: "no-store",
+        });
+        if (res.ok) return await res.json();
+        if (res.status === 404 || res.status === 400) return null;
+      } catch {
+        // timeout or network error: try again
+      }
     }
+    throw new Error("MusicBrainz unavailable");
+  };
+  const result = queue.then(run, run);
+  queue = result.catch(() => undefined);
+  return result;
+}
+
+/**
+ * Years a recording came out, counting only official releases: demos and bootlegs often carry
+ * dates from before the song was really released (Mr. Brightside demos show up as 2001).
+ */
+function recordingYears(r: Recording): number[] {
+  if (/\b(demo|rehearsal|outtake)\b/i.test(r.disambiguation ?? "")) return [];
+  if (r.releases?.length) {
+    return r.releases
+      .filter((rel) => !rel.status || rel.status === "Official")
+      .map((rel) => yearOf(rel.date))
+      .filter((y): y is number => y !== null);
   }
-  return null;
+  const y = yearOf(r["first-release-date"]);
+  return y ? [y] : [];
 }
 
 const lucene = (s: string) => s.replace(/["\\]/g, "");
@@ -72,22 +104,29 @@ export async function GET(req: Request) {
     const year = yearOf(date);
     if (year) found.push({ from, title: t ?? "", year });
   };
+  const addYears = (from: string, t: string | undefined, years: number[]) => {
+    for (const year of years) found.push({ from, title: t ?? "", year });
+  };
+  // Any step MusicBrainz didn't answer makes the result incomplete: use it, but don't cache it.
+  let incomplete = false;
+  const ask = (path: string) =>
+    mb(path).catch(() => {
+      incomplete = true;
+      return null;
+    });
   // "Good Golly, Miss Molly" matches "Good Golly Miss Molly"; a single "A-side / B-side" matches either side.
   const sameSong = (t?: string) => !!t && t.split(/\s+\/\s+/).some((part) => norm(cleanTitle(part)) === songKey);
 
   // 1. The exact recording Spotify is playing.
   if (isrc) {
-    const data = await mb(`isrc/${encodeURIComponent(isrc)}?fmt=json&inc=releases`);
-    for (const r of (data?.recordings ?? []) as Recording[]) {
-      add("isrc", r.title, r["first-release-date"]);
-      for (const rel of r.releases ?? []) add("isrc", r.title, rel.date);
-    }
+    const data = await ask(`isrc/${encodeURIComponent(isrc)}?fmt=json&inc=releases`);
+    for (const r of (data?.recordings ?? []) as Recording[]) addYears("isrc", r.title, recordingYears(r));
   }
 
   // Pin down the artist: the best-scoring artist whose name matches what Spotify says.
   let artistId: string | null = null;
   if (artist) {
-    const data = await mb(`artist?fmt=json&limit=5&query=${encodeURIComponent(`artist:"${lucene(artist)}"`)}`);
+    const data = await ask(`artist?fmt=json&limit=5&query=${encodeURIComponent(`artist:"${lucene(artist)}"`)}`);
     const artists = (data?.artists ?? []) as Artist[];
     artistId = (artists.find((a) => norm(a.name) === norm(artist)) ?? artists[0])?.id ?? null;
   }
@@ -95,7 +134,7 @@ export async function GET(req: Request) {
   if (artistId && songKey) {
     // 2. Every single by the artist, oldest first, looking for this song's title.
     for (let offset = 0; offset < 300; offset += 100) {
-      const data = await mb(`release-group?fmt=json&artist=${artistId}&type=single&limit=100&offset=${offset}`);
+      const data = await ask(`release-group?fmt=json&artist=${artistId}&type=single&limit=100&offset=${offset}`);
       const groups = (data?.["release-groups"] ?? []) as ReleaseGroup[];
       for (const g of groups) if (sameSong(g.title)) add("single", g.title, g["first-release-date"]);
       if (groups.length < 100) break;
@@ -104,9 +143,9 @@ export async function GET(req: Request) {
     // 3. Every recording of the song credited to this exact artist.
     const query = `recording:"${lucene(title)}" AND arid:${artistId}`;
     for (let offset = 0; offset < 300; offset += 100) {
-      const data = await mb(`recording?fmt=json&limit=100&offset=${offset}&query=${encodeURIComponent(query)}`);
+      const data = await ask(`recording?fmt=json&limit=100&offset=${offset}&query=${encodeURIComponent(query)}`);
       const recs = (data?.recordings ?? []) as Recording[];
-      for (const r of recs) if (sameSong(r.title)) add("recording", r.title, r["first-release-date"]);
+      for (const r of recs) if (sameSong(r.title)) addYears("recording", r.title, recordingYears(r));
       if (recs.length < 100 || offset + 100 >= (data?.count ?? 0)) break;
     }
   }
@@ -116,7 +155,7 @@ export async function GET(req: Request) {
   const result = first
     ? { year: first.year, source: "musicbrainz", matched: first.title }
     : { year: spotifyYear, source: spotifyYear ? "spotify" : "none", matched: null };
-  if (year) cache.set(key, result);
+  if (year && !incomplete) cache.set(key, result);
 
   if (debug) {
     const earliestFrom = (from: string) => {
@@ -126,6 +165,7 @@ export async function GET(req: Request) {
     return NextResponse.json({
       ...result,
       artistId,
+      incomplete,
       earliest: { isrc: earliestFrom("isrc"), single: earliestFrom("single"), recording: earliestFrom("recording") },
       oldest: [...found].sort((a, b) => a.year - b.year).slice(0, 5),
     });
