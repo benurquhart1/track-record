@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+@theme {
+  --color-ink: #0f0d1a;
+  --color-panel: #1b1830;
+  --color-line: #2e2a4a;
+  --color-accent: #ff3d7f;
+  --color-accent-2: #3dd6ff;
+  --color-good: #34d399;
+  --color-bad: #f87171;
+}
+
+body {
+  background: var(--color-ink);
+  color: #f4f2ff;
+  -webkit-tap-highlight-color: transparent;
+}
