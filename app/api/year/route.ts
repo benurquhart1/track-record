@@ -174,8 +174,11 @@ export async function GET(req: Request) {
   const trusted = (f: Found) => f.from === "single" || found.filter((g) => g.year === f.year).length >= 2;
   const first = sorted.find(trusted) ?? sorted[0];
   const year = first?.year ?? null;
+  // Very old records often only show up on later compilations (Joseíto Fernández's 1929
+  // Guantanamera is only in MusicBrainz from 1997), so flag those for the host to check.
+  const onlyCompilations = found.length > 0 && found.every((f) => f.kind?.includes("Compilation"));
   const result = first
-    ? { year: first.year, source: "musicbrainz", matched: first.title }
+    ? { year: first.year, source: onlyCompilations ? "compilation" : "musicbrainz", matched: first.title }
     : { year: spotifyYear, source: spotifyYear ? "spotify" : "none", matched: null };
   if (year && !incomplete) cache.set(key, result);
 

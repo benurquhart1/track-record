@@ -307,7 +307,9 @@ function HostGame({
             <p className="mt-2 text-xs text-white/50">
               {yearSource === "musicbrainz"
                 ? "Year checked against MusicBrainz."
-                : "Couldn't verify this year, it's Spotify's album date. Fix it below if it's wrong."}
+                : yearSource === "compilation"
+                  ? "This song only turned up on compilations, so the real year may be earlier. Fix it below if you know it."
+                  : "Couldn't verify this year, it's Spotify's album date. Fix it below if it's wrong."}
             </p>
           )}
           {secret && peek && open && (
