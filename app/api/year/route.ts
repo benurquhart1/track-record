@@ -118,7 +118,11 @@ export async function GET(req: Request) {
       return null;
     });
   // "Good Golly, Miss Molly" matches "Good Golly Miss Molly"; a single "A-side / B-side" matches either side.
-  const sameSong = (t?: string) => !!t && t.split(/\s+\/\s+/).some((part) => norm(cleanTitle(part)) === songKey);
+  // Bracketed subtitles are ignored too: "Fly Me to the Moon (In Other Words)" is "Fly Me to the Moon".
+  const bare = (t: string) => norm(t.replace(/\s*[([][^)\]]*[)\]]/g, ""));
+  const sameSong = (t?: string) =>
+    !!t &&
+    t.split(/\s+\/\s+/).some((part) => norm(cleanTitle(part)) === songKey || bare(part) === bare(title));
 
   // 1. The exact recording Spotify is playing.
   if (isrc) {
