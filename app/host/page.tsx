@@ -17,9 +17,9 @@ async function resolveYear(title: string, artist: string, isrc: string | null, s
   try {
     const res = await fetch(`/api/year?${q}`);
     const json = await res.json();
-    return (json.year as number | null) ?? spotifyYear;
+    return { year: (json.year as number | null) ?? spotifyYear, source: json.source as string };
   } catch {
-    return spotifyYear;
+    return { year: spotifyYear, source: "spotify" };
   }
 }
 
@@ -135,6 +135,7 @@ function HostGame({
   const [autoReveal, setAutoReveal] = useState(true);
   const [yearEdit, setYearEdit] = useState("");
   const [nowPlaying, setNowPlaying] = useState<string | null>(null);
+  const [yearSource, setYearSource] = useState<string | null>(null);
   const lastTrack = useRef<string | null>(secret?.spotify_track_id ?? null);
   const busy = useRef(false);
   const spotifyLost = useRef(onSpotifyLost);
@@ -156,7 +157,8 @@ function HostGame({
         if (!np || !np.isPlaying || np.id === lastTrack.current) return;
         lastTrack.current = np.id;
         const title = cleanTitle(np.title);
-        const year = await resolveYear(title, np.artist, np.isrc, np.albumYear);
+        const { year, source } = await resolveYear(title, np.artist, np.isrc, np.albumYear);
+        setYearSource(source);
         if (!year) {
           setError(`Couldn't find a year for "${title}", skipping it.`);
           return;
@@ -236,6 +238,13 @@ function HostGame({
               </div>
               <p className="text-3xl font-black text-accent-2">{secret.year}</p>
             </div>
+          )}
+          {secret && peek && open && yearSource && secret.spotify_track_id && (
+            <p className="mt-2 text-xs text-white/50">
+              {yearSource === "musicbrainz"
+                ? "Year checked against MusicBrainz."
+                : "Couldn't verify this year, it's Spotify's album date. Fix it below if it's wrong."}
+            </p>
           )}
           {secret && peek && open && (
             <form
