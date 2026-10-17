@@ -15,7 +15,16 @@ export type Player = { id: string; room_id: string; uid: string; nickname: strin
 export type Round = { id: string; room_id: string; number: number; status: "open" | "closed" };
 export type Secret = { round_id: string; spotify_track_id: string | null; title: string; artist: string; year: number; image_url: string | null };
 export type Answer = { round_id: string; player_id: string; slot: number; is_correct: boolean | null };
-export type Card = { id: string; player_id: string; round_id: string | null; year: number; title: string; artist: string };
+export type Card = {
+  id: string;
+  player_id: string;
+  round_id: string | null;
+  year: number;
+  title: string;
+  artist: string;
+  /** Album cover, filled in from the revealed round (starting cards have none). */
+  image_url?: string | null;
+};
 
 export type RoomState = {
   room: Room;
@@ -66,6 +75,13 @@ async function loadRoom(roomId: string): Promise<RoomState | null> {
     sb.from("timeline_cards").select("*").eq("room_id", roomId).order("year"),
   ]);
   if (!room.data) return null;
+  const cardList: Card[] = cards.data ?? [];
+  const roundIds = [...new Set(cardList.map((c) => c.round_id).filter((id): id is string => !!id))];
+  if (roundIds.length) {
+    const { data: covers } = await sb.from("round_secrets").select("round_id, image_url").in("round_id", roundIds);
+    const byRound = new Map((covers ?? []).map((c) => [c.round_id, c.image_url]));
+    for (const c of cardList) c.image_url = c.round_id ? byRound.get(c.round_id) ?? null : null;
+  }
   let secret: Secret | null = null;
   let answers: Answer[] = [];
   if (round.data) {
@@ -76,7 +92,7 @@ async function loadRoom(roomId: string): Promise<RoomState | null> {
     secret = s.data;
     answers = a.data ?? [];
   }
-  return { room: room.data, players: players.data ?? [], round: round.data, secret, answers, cards: cards.data ?? [] };
+  return { room: room.data, players: players.data ?? [], round: round.data, secret, answers, cards: cardList };
 }
 
 /** Live view of a room: loads everything, then reloads whenever anything in the room changes. */

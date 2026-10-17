@@ -32,6 +32,10 @@ npm run dev                  # http://127.0.0.1:3000 (use 127.0.0.1, not localho
 ### 4. Deploy (so friends' phones can reach it)
 Import the repo on [vercel.com](https://vercel.com), add the same three environment variables, deploy, and then add the Vercel URL's `/callback` to the Spotify app's redirect URIs.
 
+## Designing screens
+
+Open `/demo` (e.g. `track-record-green.vercel.app/demo`) for a clickable player screen with fake data: no Spotify, Supabase or friends needed. The controls at the top step through lobby, guessing, reveal and game over. The player screen lives in `components/PlayerView.tsx` and the timeline rows in `components/Timeline.tsx`.
+
 ## How the code is laid out
 
 - `lib/`: everything that isn't UI (Spotify login and polling, Supabase calls, the live room hook). Redesigns shouldn't need to touch this.
