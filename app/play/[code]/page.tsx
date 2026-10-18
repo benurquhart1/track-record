@@ -6,6 +6,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { PlayerView } from "@/components/PlayerView";
 import { Button, ErrorText } from "@/components/ui";
 import { findRoomByCode, joinRoom, submitAnswer, useRoom, type RoomState } from "@/lib/game";
+import { NextSongButton } from "@/components/HostControls";
 import { useHostDriver } from "@/lib/hostDriver";
 import { isLoggedIn, logout } from "@/lib/spotify";
 import { ensureSession } from "@/lib/supabase";
@@ -67,7 +68,7 @@ export default function PlayPage() {
 
 function HostingPlayer({ state, refresh, children }: { state: RoomState; refresh: () => Promise<void>; children: ReactNode }) {
   const [spotify, setSpotify] = useState(true);
-  const { error, nowPlaying } = useHostDriver({
+  const { error, nowPlaying, next } = useHostDriver({
     state,
     refresh,
     spotify,
@@ -97,6 +98,7 @@ function HostingPlayer({ state, refresh, children }: { state: RoomState; refresh
           </>
         )}
       </p>
+      {spotify && state.round && state.room.status !== "finished" && <NextSongButton onNext={next} className="mb-3 py-3 text-base" />}
       <ErrorText error={error} />
       {children}
     </div>

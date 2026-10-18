@@ -162,5 +162,17 @@ select count(*) = 0 as ok_outsider from locked_in(:'r7') \gset
 \if :ok_outsider \else \echo 'FAIL: outsider sees locked_in' \quit \endif
 set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
 
+-- Host settings: only the host can change them.
+select target_cards = 7 and auto_next as ok_settings from update_room_settings(:'room3', 7, true) \gset
+\if :ok_settings \else \echo 'FAIL: update_room_settings' \quit \endif
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000b';
+do $$ begin
+  perform update_room_settings((select room_id from players where nickname = 'Alice' order by created_at desc limit 1), null, false);
+  raise exception 'FAIL: player changed settings';
+exception when others then
+  if sqlerrm like 'FAIL%' then raise; end if;
+end $$;
+set request.jwt.claim.sub = '00000000-0000-0000-0000-00000000000a';
+
 select * from alltime_leaderboard order by wins desc;
 \echo 'ALL TESTS PASSED'

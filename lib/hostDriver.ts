@@ -2,10 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import { closeRound, openRound, setRoundYear, type RoomState } from "./game";
-import { getNowPlaying, getQueue } from "./spotify";
+import { getNowPlaying, getQueue, skipToNext } from "./spotify";
 import { cleanTitle } from "./year";
 
 const POLL_MS = 1500;
+/** Pause between the last guess and auto-skipping, so people can see their result. */
+const AUTO_NEXT_DELAY_MS = 4000;
 /** How often to look ahead in the Spotify queue and pre-fetch the next songs' years. */
 const QUEUE_MS = 10_000;
 
@@ -184,5 +186,21 @@ export function useHostDriver({
     closeRound(round.id).then(refresh).catch((e: Error) => setError(e.message));
   }, [autoReveal, open, round, players.length, answers.length, refresh]);
 
-  return { error, setError, nowPlaying, yearSource, setYearSource };
+  // Skip to the next song once everyone has guessed, if the host turned that on. A short pause
+  // lets everyone see their result first.
+  const skipped = useRef<string | null>(null);
+  const everyoneIn = !!round && players.length > 0 && answers.length >= players.length;
+  useEffect(() => {
+    if (!room.auto_next || !spotify || finished || !everyoneIn || !round || skipped.current === round.id) return;
+    const id = setTimeout(() => {
+      if (document.visibilityState !== "visible" || skipped.current === round.id) return;
+      skipped.current = round.id;
+      skipToNext().catch((e: Error) => setError(e.message));
+    }, AUTO_NEXT_DELAY_MS);
+    return () => clearTimeout(id);
+  }, [room.auto_next, spotify, finished, everyoneIn, round]);
+
+  const next = () => skipToNext().catch((e: Error) => setError(e.message));
+
+  return { error, setError, nowPlaying, yearSource, setYearSource, next };
 }

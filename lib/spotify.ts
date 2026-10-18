@@ -1,10 +1,11 @@
 // Spotify Authorization Code + PKCE, entirely in the host's browser. No client secret.
 
-const SCOPES = "user-read-currently-playing user-read-playback-state";
+// user-modify-playback-state lets the host skip songs from the game.
+const SCOPES = "user-read-currently-playing user-read-playback-state user-modify-playback-state";
 const TOKEN_KEY = "spotify_tokens";
 const VERIFIER_KEY = "spotify_pkce_verifier";
 
-type Tokens = { access_token: string; refresh_token: string; expires_at: number };
+type Tokens = { access_token: string; refresh_token: string; expires_at: number; scope?: string };
 
 export type NowPlaying = {
   id: string;
@@ -59,6 +60,7 @@ async function requestTokens(body: Record<string, string>): Promise<Tokens> {
     // Spotify may or may not rotate the refresh token.
     refresh_token: json.refresh_token ?? body.refresh_token,
     expires_at: Date.now() + json.expires_in * 1000,
+    scope: json.scope ?? (JSON.parse(localStorage.getItem(TOKEN_KEY) ?? "{}") as Partial<Tokens>).scope,
   };
   localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
   return tokens;
@@ -73,6 +75,27 @@ export async function finishLogin(code: string): Promise<void> {
 
 export function isLoggedIn(): boolean {
   return !!localStorage.getItem(TOKEN_KEY);
+}
+
+/** Whether the host connected with permission to skip songs (older logins didn't ask for it). */
+export function canSkip(): boolean {
+  try {
+    const t: Tokens = JSON.parse(localStorage.getItem(TOKEN_KEY) ?? "{}");
+    return !!t.scope?.includes("user-modify-playback-state");
+  } catch {
+    return false;
+  }
+}
+
+/** Skips to the next song on whatever device Spotify is playing on. */
+export async function skipToNext(): Promise<void> {
+  const res = await fetch("https://api.spotify.com/v1/me/player/next", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${await accessToken()}` },
+  });
+  if (res.status === 403) throw new Error("Spotify won't let this account skip (it needs Premium, or reconnect Spotify).");
+  if (res.status === 404) throw new Error("Spotify isn't playing on any device right now.");
+  if (!res.ok && res.status !== 204) throw new Error(`Couldn't skip (${res.status})`);
 }
 
 export function logout(): void {

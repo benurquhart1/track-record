@@ -13,7 +13,7 @@ Stack: Next.js 15 + Tailwind on Vercel, and Supabase (Postgres, Realtime, anonym
 
 ### 1. Supabase
 1. Create a free project at [supabase.com](https://supabase.com).
-2. **SQL Editor**: paste and run each file in `supabase/migrations/` in order (`0001_init.sql`, `0002_…`, `0003_…`, `0004_…`, `0005_…`).
+2. **SQL Editor**: paste and run each file in `supabase/migrations/` in order (`0001_init.sql`, `0002_…`, `0003_…`, `0004_…`, `0005_…`, `0006_…`).
 3. **Authentication → Sign In / Providers**: turn on **Allow anonymous sign-ins**.
 4. **Connect** (top of the dashboard): copy the Project URL and the publishable key (`sb_publishable_…`; the legacy `anon` key also works).
 

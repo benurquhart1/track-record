@@ -3,6 +3,8 @@
 import { useEffect, useState } from "react";
 import { Leaderboard } from "@/components/Leaderboard";
 import { QrCode } from "@/components/QrCode";
+import { HostSettings, LockedInCount, NextSongButton } from "@/components/HostControls";
+import { Stepper, TargetPicker } from "@/components/Settings";
 import { Button, ErrorText, Panel, buttonClass } from "@/components/ui";
 import { closeRound, createRoom, endGame, openRound, setRoundYear, standings, useRoom } from "@/lib/game";
 import { useHostDriver } from "@/lib/hostDriver";
@@ -54,35 +56,12 @@ export default function HostPage() {
       <div className="space-y-4 pt-10">
         <h1 className="text-3xl font-black">New game</h1>
         <Panel>
-          <label className="block text-sm font-semibold text-white/60">Cards needed to win</label>
-          <div className="mt-3 flex gap-2">
-            {[5, 10, 15, null].map((n) => (
-              <button
-                key={n ?? "none"}
-                onClick={() => setTarget(n)}
-                className={`flex-1 rounded-xl border py-3 text-xl font-bold ${target === n ? "border-accent bg-accent/20" : "border-line"}`}
-              >
-                {n ?? "∞"}
-              </button>
-            ))}
-          </div>
-          {target === null && <p className="mt-2 text-sm text-white/50">No limit. You end the game when you&apos;re done.</p>}
+          <TargetPicker value={target} onChange={setTarget} />
         </Panel>
         <Panel>
           <label className="block text-sm font-semibold text-white/60">Starting cards per player</label>
-          <div className="mt-3 flex items-center gap-3">
-            <button onClick={() => setStarting((n) => Math.max(1, n - 1))} className="h-12 w-12 rounded-xl border border-line text-2xl font-bold">
-              −
-            </button>
-            <input
-              value={starting}
-              onChange={(e) => setStarting(Math.max(1, Math.min(10, parseInt(e.target.value.replace(/\D/g, ""), 10) || 1)))}
-              inputMode="numeric"
-              className="h-12 min-w-0 flex-1 rounded-xl border border-line bg-ink text-center text-xl font-bold"
-            />
-            <button onClick={() => setStarting((n) => Math.min(10, n + 1))} className="h-12 w-12 rounded-xl border border-line text-2xl font-bold">
-              +
-            </button>
+          <div className="mt-3">
+            <Stepper value={starting} onChange={setStarting} min={1} max={10} />
           </div>
           <p className="mt-2 text-sm text-white/50">Everyone gets their own random years from 1950 to 2022.</p>
         </Panel>
@@ -137,13 +116,14 @@ function HostGame({
   onNewGame: () => void;
   onSpotifyLost: () => void;
 }) {
-  const { room, round, secret, players, answers } = state;
+  const { room, round, secret, players } = state;
   const [peek, setPeek] = useState(false);
   const [yearEdit, setYearEdit] = useState("");
   const joinUrl = typeof window === "undefined" ? "" : `${window.location.origin}/play/${room.code}`;
   const finished = room.status === "finished";
 
-  const { error, setError, nowPlaying, yearSource } = useHostDriver({
+  const [tab, setTab] = useState<"game" | "settings">("game");
+  const { error, setError, nowPlaying, yearSource, next } = useHostDriver({
     state,
     refresh,
     spotify,
@@ -170,6 +150,22 @@ function HostGame({
         </p>
       </header>
 
+      <nav className="flex gap-2 rounded-2xl border border-line bg-panel p-1">
+        {(["game", "settings"] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => setTab(t)}
+            className={`flex-1 rounded-xl py-2 font-semibold capitalize ${tab === t ? "bg-accent text-white" : "text-white/60"}`}
+          >
+            {t}
+          </button>
+        ))}
+      </nav>
+
+      {tab === "settings" ? (
+        <HostSettings state={state} refresh={refresh} spotify={spotify} />
+      ) : (
+      <>
       {finished ? (
         <Panel className="text-center">
           <p className="text-white/60">Winner</p>
@@ -182,12 +178,14 @@ function HostGame({
         <Panel>
           <div className="flex items-center justify-between">
             <p className="font-semibold">
-              Song {round.number} · {open ? `${answers.length}/${players.length} locked in` : "revealed"}
+              Song {round.number}
+              {!open && " · revealed"}
             </p>
             <button className="text-sm text-white/50 underline" onClick={() => setPeek((v) => !v)}>
               {peek || !open ? "Hide" : "Peek"}
             </button>
           </div>
+          <LockedInCount state={state} className="mt-3" />
           {secret && (peek || !open) && (
             <div className="mt-4 flex items-center gap-4">
               {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -240,6 +238,7 @@ function HostGame({
             </Button>
           )}
           {!open && <p className="mt-3 text-sm text-white/50">Next song starts the next round.</p>}
+          {spotify && <NextSongButton onNext={next} className="mt-3" />}
         </Panel>
       ) : (
         <Panel className="text-center">
@@ -290,6 +289,8 @@ function HostGame({
       <button className="w-full text-sm text-white/40 underline" onClick={onNewGame}>
         End this game and start a new one
       </button>
+      </>
+      )}
     </div>
   );
 }

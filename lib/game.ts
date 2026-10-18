@@ -11,6 +11,8 @@ export type Room = {
   /** null = no card limit; the host ends the game. */
   target_cards: number | null;
   starting_cards: number;
+  /** Skip to the next song once everyone has guessed. */
+  auto_next?: boolean;
   winner_player_id: string | null;
 };
 export type Player = { id: string; room_id: string; uid: string; nickname: string; created_at: string };
@@ -68,6 +70,8 @@ export const createRoom = (targetCards: number | null, startingCards: number) =>
   rpc<Room>("create_room", { p_target_cards: targetCards, p_starting_cards: startingCards });
 export const joinRoom = (code: string, nickname: string) => rpc<Player>("join_room", { p_code: code, p_nickname: nickname });
 export const submitAnswer = (roundId: string, slot: number) => rpc<Answer>("submit_answer", { p_round: roundId, p_slot: slot });
+export const updateRoomSettings = (roomId: string, targetCards: number | null, autoNext: boolean) =>
+  rpc<Room>("update_room_settings", { p_room: roomId, p_target_cards: targetCards, p_auto_next: autoNext });
 export const endGame = (roomId: string) => rpc<void>("end_game", { p_room: roomId });
 export const closeRound = (roundId: string) => rpc<void>("close_round", { p_round: roundId });
 export const setRoundYear = (roundId: string, year: number) => rpc<void>("set_round_year", { p_round: roundId, p_year: year });

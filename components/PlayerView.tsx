@@ -5,7 +5,8 @@ import { Leaderboard } from "@/components/Leaderboard";
 import { Timeline } from "@/components/Timeline";
 import { Button, ErrorText, Panel } from "@/components/ui";
 import { yearColor } from "@/lib/colors";
-import { cardsOf, lockedInIds, type RoomState } from "@/lib/game";
+import { LockedInCount } from "@/components/HostControls";
+import { cardsOf, type RoomState } from "@/lib/game";
 import { missBy } from "@/lib/stats";
 
 /** The player's whole game screen. Pure UI: data comes in, the guess goes out. */
@@ -70,6 +71,7 @@ export function PlayerView({
           <p className="text-sm font-semibold text-white/50">Song {round.number}</p>
           <p className="mt-1 text-2xl font-black">When was this released?</p>
           <p className="mt-1 text-white/60">Drag the mystery song into place, or tap between two cards.</p>
+          <LockedInCount state={state} className="mt-3" />
         </Panel>
       ) : (
         <RevealPanel state={state} meId={meId} />
@@ -142,9 +144,14 @@ function RevealPanel({ state, meId }: { state: RoomState; meId: string }) {
           )}
         </div>
       )}
-      <p className="mt-3 text-sm text-white/50">{stillOpen
-          ? `${lockedInIds(state).size}/${state.players.length} locked in. Keep it quiet!`
-          : "Waiting for the next song…"}</p>
+      {stillOpen ? (
+        <>
+          <LockedInCount state={state} className="mt-3" />
+          <p className="mt-1 text-sm text-white/50">Keep it quiet until everyone&apos;s in!</p>
+        </>
+      ) : (
+        <p className="mt-3 text-sm text-white/50">Waiting for the next song…</p>
+      )}
     </Panel>
   );
 }
